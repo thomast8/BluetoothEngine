@@ -177,7 +177,7 @@ final class DebugModel {
 
         if let parser = makeParser() {
             logger.log("parser", ["choice": parserChoice.rawValue, "type": "\(type(of: parser))"])
-            let measureStream = central.measurements(using: parser)
+            let measureStream = pulseOxMeasurements(from: central.notifications(), parser: parser)
             measureTask = Task { @MainActor in
                 for await measurement in measureStream {
                     self.latest = measurement

@@ -69,8 +69,7 @@ enum SensorRunner {
         let source = installInterruptHandler { Task { @MainActor in central.finishActiveStreams() } }
         defer { source.cancel() }
 
-        let stream = central.notifications()
-        try await central.subscribe(characteristics: chars)
+        let stream = try await central.startNotifications(characteristics: chars)
         print("subscribed — Ctrl-C to stop")
 
         let iso = ISO8601DateFormatter()
@@ -113,7 +112,7 @@ enum SensorRunner {
         defer { source.cancel() }
 
         let targets = parser.characteristicUUIDs.map { $0.uuidString }
-        let stream = central.measurements(using: parser)
+        let stream = pulseOxMeasurements(from: central.notifications(), parser: parser)
         try await central.subscribe(characteristics: targets.isEmpty ? nil : targets)
         print("decoding with \(type(of: parser)) — Ctrl-C to stop")
 

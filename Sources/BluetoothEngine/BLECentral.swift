@@ -30,10 +30,10 @@ public final class BLECentral: NSObject {
     private var discoverDescWaiters: [CBUUID: CheckedContinuation<Void, Error>] = [:]
     private var readWaiters: [CBUUID: CheckedContinuation<Data?, Never>] = [:]
 
-    // Live streams.
-    private var notificationContinuation: AsyncStream<RawNotification>.Continuation?
-    private var measurementContinuation: AsyncStream<PulseOxMeasurement>.Continuation?
-    private var activeParser: MeasurementParser?
+    // Raw-notification fan-out: any number of listeners, each receives every notification. The
+    // transport has no knowledge of decoding — measurement parsing is a separate stream transform.
+    private var notificationListeners: [Int: AsyncStream<RawNotification>.Continuation] = [:]
+    private var nextListenerID = 0
 
     public override init() {
         super.init()
@@ -240,26 +240,35 @@ public final class BLECentral: NSObject {
         }
     }
 
-    /// Raw timestamped notifications for capture (`raw` command).
+    /// Register a listener for raw notifications. May be called any number of times — every listener
+    /// receives every notification. Register before `subscribe` (or use `startNotifications`) so no
+    /// early frames are missed. The stream ends on `finishActiveStreams()` / disconnect, or when the
+    /// consumer drops it. To decode measurements, feed the stream to `pulseOxMeasurements(from:parser:)`.
     public func notifications() -> AsyncStream<RawNotification> {
+        let id = nextListenerID
+        nextListenerID += 1
         let (stream, continuation) = AsyncStream<RawNotification>.makeStream()
-        notificationContinuation = continuation
+        notificationListeners[id] = continuation
+        continuation.onTermination = { [weak self] _ in
+            Task { @MainActor in self?.notificationListeners[id] = nil }
+        }
         return stream
     }
 
-    /// Parsed measurements for live decoding (`decode` command). Set before `subscribe`.
-    public func measurements(using parser: MeasurementParser) -> AsyncStream<PulseOxMeasurement> {
-        activeParser = parser
-        let (stream, continuation) = AsyncStream<PulseOxMeasurement>.makeStream()
-        measurementContinuation = continuation
+    /// Register a listener and enable the matching GATT notifications in one call, so the
+    /// "register before subscribe" ordering can't be gotten wrong for a single consumer.
+    public func startNotifications(characteristics uuids: [String]? = nil) async throws -> AsyncStream<RawNotification> {
+        let stream = notifications()
+        try await subscribe(characteristics: uuids)
         return stream
     }
 
     /// Finish all live streams (called from a SIGINT handler so capture loops fall through to cleanup).
     public func finishActiveStreams() {
         scanContinuation?.finish()
-        notificationContinuation?.finish()
-        measurementContinuation?.finish()
+        let listeners = notificationListeners
+        notificationListeners.removeAll()
+        listeners.values.forEach { $0.finish() }
     }
 
     // MARK: - Helpers
@@ -398,16 +407,12 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate {
             return
         }
 
-        notificationContinuation?.yield(RawNotification(
+        let note = RawNotification(
             characteristicUUID: uuid.uuidString,
             data: data,
             monotonicSeconds: monotonicSeconds(),
             wallClock: Date()
-        ))
-
-        if let parser = activeParser,
-           let measurement = parser.parse(characteristic: uuid, value: data) {
-            measurementContinuation?.yield(measurement)
-        }
+        )
+        for listener in notificationListeners.values { listener.yield(note) }
     }
 }
