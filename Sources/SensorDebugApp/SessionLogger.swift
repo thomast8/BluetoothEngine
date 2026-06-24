@@ -24,7 +24,9 @@ final class SessionLogger: @unchecked Sendable {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             url = dir.appendingPathComponent("session.jsonl")
         }
-        fd = open(url.path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        // O_NOFOLLOW: don't follow a symlink at the final path component, so a planted symlink at the
+        // (env-overridable) log path can't redirect this truncating open onto an arbitrary file.
+        fd = open(url.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o644)
 
         let port = env["SENSOR_DEBUG_PORT"].flatMap { UInt16($0) } ?? 8787
         server = DebugStreamServer(port: port)

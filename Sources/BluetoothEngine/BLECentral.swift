@@ -68,18 +68,41 @@ public final class BLECentral: NSObject {
     }
 
     private func resolveReady(_ state: CBManagerState) {
-        guard !readyWaiters.isEmpty else { return }
-        let waiters = readyWaiters
-        let resume: (CheckedContinuation<Void, Error>) -> Void
-        switch state {
-        case .poweredOn: resume = { $0.resume() }
-        case .unauthorized: resume = { $0.resume(throwing: BLEError.permissionDenied) }
-        case .poweredOff: resume = { $0.resume(throwing: BLEError.poweredOff) }
-        case .unsupported: resume = { $0.resume(throwing: BLEError.unsupported) }
-        default: return // keep waiting
+        if !readyWaiters.isEmpty {
+            let resume: ((CheckedContinuation<Void, Error>) -> Void)?
+            switch state {
+            case .poweredOn: resume = { $0.resume() }
+            case .unauthorized: resume = { $0.resume(throwing: BLEError.permissionDenied) }
+            case .poweredOff: resume = { $0.resume(throwing: BLEError.poweredOff) }
+            case .unsupported: resume = { $0.resume(throwing: BLEError.unsupported) }
+            default: resume = nil // .unknown / .resetting → keep waiting
+            }
+            if let resume {
+                let waiters = readyWaiters
+                readyWaiters.removeAll()
+                waiters.forEach(resume)
+            }
         }
-        readyWaiters.removeAll()
-        waiters.forEach(resume)
+        // A terminal state also strands any in-flight connect / discovery / read.
+        switch state {
+        case .poweredOff: failAllPending(BLEError.poweredOff)
+        case .unauthorized: failAllPending(BLEError.permissionDenied)
+        case .unsupported: failAllPending(BLEError.unsupported)
+        default: break
+        }
+    }
+
+    /// Resume every in-flight continuation so an unexpected disconnect / power-off cannot hang an
+    /// awaiting connect / inventory / read. Read waiters resume with nil (their continuation can't throw).
+    private func failAllPending(_ error: Error) {
+        if let cont = connectContinuation { connectContinuation = nil; cont.resume(throwing: error) }
+        if let cont = discoverServicesWaiter { discoverServicesWaiter = nil; cont.resume(throwing: error) }
+        let chars = discoverCharsWaiters; discoverCharsWaiters.removeAll()
+        chars.values.forEach { $0.resume(throwing: error) }
+        let descs = discoverDescWaiters; discoverDescWaiters.removeAll()
+        descs.values.forEach { $0.resume(throwing: error) }
+        let reads = readWaiters; readWaiters.removeAll()
+        reads.values.forEach { $0.resume(returning: nil) }
     }
 
     // MARK: - Scanning
@@ -322,6 +345,8 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
+        self.peripheral = nil
+        failAllPending(BLEError.connectionFailed(reason: error?.localizedDescription ?? "peripheral disconnected"))
         finishActiveStreams()
     }
 }
@@ -369,7 +394,7 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate {
 
         // A pending read takes precedence; otherwise it's a subscription notification.
         if let waiter = readWaiters.removeValue(forKey: uuid) {
-            waiter.resume(returning: characteristic.value)
+            waiter.resume(returning: error == nil ? characteristic.value : nil)
             return
         }
 

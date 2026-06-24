@@ -32,6 +32,10 @@ final class DebugStreamServer: @unchecked Sendable {
         params.requiredInterfaceType = .loopback
         do {
             let listener = try NWListener(using: params, on: nwPort)
+            listener.stateUpdateHandler = { [weak self] state in
+                // Surface a bind failure (e.g. port already in use) instead of silently never serving.
+                if case .failed(let error) = state { self?.lastError = "listener failed: \(error)" }
+            }
             listener.newConnectionHandler = { [weak self] connection in
                 self?.accept(connection)
             }
@@ -43,6 +47,11 @@ final class DebugStreamServer: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
+        // Bound concurrent observers so a pile of stuck clients can't grow unboundedly (loopback only).
+        guard clients.count < 16 else {
+            connection.cancel()
+            return
+        }
         clients[ObjectIdentifier(connection)] = connection
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
@@ -55,12 +64,14 @@ final class DebugStreamServer: @unchecked Sendable {
         connection.start(queue: queue)
 
         // Minimal SSE response header; we don't parse the request, any path streams events.
+        // No Access-Control-Allow-Origin: this is a loopback dev stream; we don't want arbitrary
+        // local web pages reading device identifiers / health data cross-origin. `curl`/EventSource
+        // on the same origin still work.
         let header = """
         HTTP/1.1 200 OK\r
         Content-Type: text/event-stream\r
         Cache-Control: no-cache\r
         Connection: keep-alive\r
-        Access-Control-Allow-Origin: *\r
         \r
 
         """

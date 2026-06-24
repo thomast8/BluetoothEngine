@@ -43,12 +43,25 @@ final class DebugModel {
     var latest: PulseOxMeasurement?
     var log: [LogLine] = []
     var parserChoice: ParserChoice = .auto
+    /// When on, the device list shows only peripherals the engine can decode (debug app shows all by
+    /// default; scanning itself stays unfiltered so nothing is hidden from the live capture/stream).
+    var supportedOnly: Bool = false
 
     private let logLimit = 500
 
     /// Where an external observer can watch this session live.
     var logPath: String { logger.url.path }
     var streamURL: String { "http://127.0.0.1:\(logger.server.port)/" }
+
+    /// Devices to present, honoring the "supported only" filter.
+    var visibleDevices: [DiscoveredPeripheral] {
+        supportedOnly ? devices.filter { SupportedDevices.supports($0) } : devices
+    }
+
+    /// Whether the engine recognises this peripheral as one it can decode.
+    func isSupported(_ device: DiscoveredPeripheral) -> Bool {
+        SupportedDevices.supports(device)
+    }
 
     func refreshAuthorization() {
         authorization = central.authorizationDescription
@@ -78,6 +91,7 @@ final class DebugModel {
                         "rssi": device.rssi,
                         "services": device.advertisedServices,
                         "connectable": device.isConnectable,
+                        "supported": SupportedDevices.supports(device),
                     ])
                 }
             }
@@ -133,21 +147,18 @@ final class DebugModel {
         logger.log("error", ["message": message])
     }
 
-    private func makeParser() -> MeasurementParser {
+    /// Returns the decoder for the current selection, or nil if `auto` finds no supported parser for
+    /// the connected device (rather than silently falling back to a no-op stub).
+    private func makeParser() -> MeasurementParser? {
         switch parserChoice {
         case .plxs: return PLXSParser()
         case .proprietary: return ProprietaryPM100Parser()
-        case .auto:
-            let hasPLXS = services.contains { $0.uuid.localizedCaseInsensitiveContains("1822") }
-            return hasPLXS ? PLXSParser() : ProprietaryPM100Parser()
+        case .auto: return SupportedDevices.parser(forServiceUUIDs: services.map(\.uuid))
         }
     }
 
     private func startStreaming() {
-        logger.log("parser", ["choice": parserChoice.rawValue])
         let rawStream = central.notifications()
-        let measureStream = central.measurements(using: makeParser())
-
         rawTask = Task { @MainActor in
             for await note in rawStream {
                 let hex = Self.hex(note.data)
@@ -163,18 +174,27 @@ final class DebugModel {
                 ])
             }
         }
-        measureTask = Task { @MainActor in
-            for await measurement in measureStream {
-                self.latest = measurement
-                self.logger.log("measurement", [
-                    "spo2": measurement.spo2 ?? NSNull(),
-                    "pr": measurement.pulseRate ?? NSNull(),
-                    "finger": measurement.fingerDetected,
-                    "quality": measurement.quality.rawValue,
-                    "hex": Self.hex(measurement.raw),
-                ])
+
+        if let parser = makeParser() {
+            logger.log("parser", ["choice": parserChoice.rawValue, "type": "\(type(of: parser))"])
+            let measureStream = central.measurements(using: parser)
+            measureTask = Task { @MainActor in
+                for await measurement in measureStream {
+                    self.latest = measurement
+                    self.logger.log("measurement", [
+                        "spo2": measurement.spo2 ?? NSNull(),
+                        "pr": measurement.pulseRate ?? NSNull(),
+                        "finger": measurement.fingerDetected,
+                        "quality": measurement.quality.rawValue,
+                        "hex": Self.hex(measurement.raw),
+                    ])
+                }
             }
+        } else {
+            // `auto` found no decoder for this device — stream raw frames only, don't fake measurements.
+            logger.log("no_decoder", ["choice": parserChoice.rawValue])
         }
+
         Task { @MainActor in
             do {
                 try await self.central.subscribe(characteristics: nil)

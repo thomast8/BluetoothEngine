@@ -97,13 +97,16 @@ enum SensorRunner {
         let central = BLECentral()
         try await central.connect(matching: match, timeout: timeout)
         let services = try await central.inventory(readValues: false)
-        let hasPLXS = services.contains { $0.uuid.localizedCaseInsensitiveContains("1822") }
 
-        let parser: MeasurementParser
+        let parser: MeasurementParser?
         switch service.lowercased() {
         case "plxs": parser = PLXSParser()
         case "proprietary": parser = ProprietaryPM100Parser()
-        default: parser = hasPLXS ? PLXSParser() : ProprietaryPM100Parser()
+        default: parser = SupportedDevices.parser(forServiceUUIDs: services.map(\.uuid))
+        }
+        guard let parser else {
+            central.disconnect()
+            throw BLEError.connectionFailed(reason: "no decoder for this device — use `raw` to capture frames, or pass --service plxs")
         }
 
         let source = installInterruptHandler { Task { @MainActor in central.finishActiveStreams() } }

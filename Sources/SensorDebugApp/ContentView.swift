@@ -18,23 +18,36 @@ struct ContentView: View {
     // MARK: Sidebar — scan results
 
     private var sidebar: some View {
-        List(model.devices, id: \.id) { device in
+        List(model.visibleDevices, id: \.id) { device in
             Button {
                 model.connect(to: device)
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(device.name ?? "(no name)").fontWeight(.medium)
-                    Text("rssi \(device.rssi)  ·  \(device.isConnectable ? "connectable" : "non-conn")")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(device.id.uuidString).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(device.name ?? "(no name)").fontWeight(.medium)
+                        Text("rssi \(device.rssi)  ·  \(device.isConnectable ? "connectable" : "non-conn")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(device.id.uuidString).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                    Spacer()
+                    if model.isSupported(device) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                            .help("Supported: advertises a service the engine can decode")
+                    }
                 }
             }
             .buttonStyle(.plain)
         }
         .overlay {
-            if model.devices.isEmpty {
-                ContentUnavailableView("No devices", systemImage: "dot.radiowaves.left.and.right",
-                                       description: Text("Press Scan to look for nearby BLE peripherals."))
+            if model.visibleDevices.isEmpty {
+                ContentUnavailableView(
+                    model.supportedOnly ? "No supported devices" : "No devices",
+                    systemImage: "dot.radiowaves.left.and.right",
+                    description: Text(model.supportedOnly
+                        ? "No compatible oximeter nearby. Turn off “Supported only” to see all BLE devices."
+                        : "Press Scan to look for nearby BLE peripherals.")
+                )
             }
         }
     }
@@ -158,6 +171,10 @@ struct ContentView: View {
             }
             .pickerStyle(.segmented)
             .help("Which decoder to apply to incoming frames")
+
+            Toggle("Supported only", isOn: $model.supportedOnly)
+                .toggleStyle(.switch)
+                .help("Show only peripherals the engine can decode (advertise a supported service)")
 
             if model.phase == .scanning {
                 Button("Stop", systemImage: "stop.fill", action: model.stopScan)

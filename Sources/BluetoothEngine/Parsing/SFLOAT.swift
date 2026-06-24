@@ -8,16 +8,19 @@ import Foundation
 public enum SFLOAT {
     public static func decode(_ raw: UInt16) -> Double? {
         let mantissaBits = Int(raw & 0x0FFF)
-        // Special values defined over the 12-bit mantissa field.
-        switch mantissaBits {
-        case 0x07FF, // NaN
-             0x0800, // NRes (not at this resolution)
-             0x0801, // reserved for future use
-             0x07FE, // +Inf
-             0x0802: // -Inf
-            return nil
-        default:
-            break
+        // Special values (NaN/NRes/±Inf/Reserved) are only defined when the exponent nibble is 0 — a
+        // nonzero exponent with the same mantissa pattern is an ordinary number, not a sentinel.
+        if (raw >> 12) & 0x0F == 0 {
+            switch mantissaBits {
+            case 0x07FF, // NaN
+                 0x0800, // NRes (not at this resolution)
+                 0x0801, // reserved for future use
+                 0x07FE, // +Inf
+                 0x0802: // -Inf
+                return nil
+            default:
+                break
+            }
         }
         var mantissa = mantissaBits
         if mantissa >= 0x0800 { mantissa -= 0x1000 } // sign-extend 12-bit
