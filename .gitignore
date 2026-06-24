@@ -1,0 +1,18 @@
+# SwiftPM
+.build/
+.swiftpm/
+
+# Xcode
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Local assistant/runtime state
+.claude/
+
+# Local secrets — never committed
+.env
+*.local
