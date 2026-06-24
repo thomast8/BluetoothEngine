@@ -146,7 +146,7 @@ public final class BLECentral: NSObject {
             }
             manager.scanForPeripherals(withServices: nil, options: nil)
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                try? await Task.sleep(for: .seconds(timeout))
                 guard let pending = self.connectContinuation else { return }
                 self.connectContinuation = nil
                 self.pendingMatch = nil
