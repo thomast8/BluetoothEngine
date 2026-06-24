@@ -107,6 +107,13 @@ enum SensorRunner {
             central.disconnect()
             throw BLEError.connectionFailed(reason: "no decoder for this device — use `raw` to capture frames, or pass --service plxs")
         }
+        if parser is ProprietaryPM100Parser {
+            // The proprietary decoder is a not-yet-reverse-engineered stub: it subscribes but `parse`
+            // always returns nil, so `decode --service proprietary` would otherwise sit silent forever.
+            FileHandle.standardError.write(Data(
+                "warning: the proprietary PM100 decoder is not yet implemented — it will emit no measurements. Use `raw --csv` to capture frames for reverse-engineering.\n".utf8
+            ))
+        }
 
         let source = installInterruptHandler { Task { @MainActor in central.finishActiveStreams() } }
         defer { source.cancel() }

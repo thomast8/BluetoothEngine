@@ -35,7 +35,7 @@ struct Doctor: AsyncParsableCommand {
     func run() async throws {
         let central = await BLECentral.make()
         // Let CoreBluetooth settle its initial state before reading it.
-        try? await Task.sleep(nanoseconds: 400_000_000)
+        try? await Task.sleep(for: .milliseconds(400))
         let auth = await central.authorizationDescription
         let state = await central.stateDescription
         let ready = await central.isPoweredOn
