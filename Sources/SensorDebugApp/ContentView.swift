@@ -30,10 +30,19 @@ struct ContentView: View {
                         Text(device.id.uuidString).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                     }
                     Spacer()
-                    if model.isSupported(device) {
+                    if device.id == model.connectedDevice?.id {
+                        Image(systemName: "link.circle.fill")
+                            .foregroundStyle(.blue)
+                            .help("Connected — click another device to switch")
+                    }
+                    if let info = model.supportInfo(for: device.id) {
                         Image(systemName: "checkmark.seal.fill")
                             .foregroundStyle(.green)
-                            .help("Supported: advertises a service the engine can decode")
+                            .help("Confirmed via \(info.confirmation.label) — decoder \(info.decoderName)")
+                    } else if model.showAllPassive, model.isSupported(device) {
+                        Image(systemName: "checkmark.seal")
+                            .foregroundStyle(.green)
+                            .help("Advertises a service the engine can decode (hint — connect to confirm)")
                     }
                 }
             }
@@ -42,11 +51,11 @@ struct ContentView: View {
         .overlay {
             if model.visibleDevices.isEmpty {
                 ContentUnavailableView(
-                    model.supportedOnly ? "No supported devices" : "No devices",
+                    model.showAllPassive ? "No devices" : "No supported devices",
                     systemImage: "dot.radiowaves.left.and.right",
-                    description: Text(model.supportedOnly
-                        ? "No compatible oximeter nearby. Turn off “Supported only” to see all BLE devices."
-                        : "Press Scan to look for nearby BLE peripherals.")
+                    description: Text(model.showAllPassive
+                        ? "Press Scan to look for nearby BLE peripherals."
+                        : "Scanning and probing for devices the engine can decode. Turn on “Show all” to see every BLE device.")
                 )
             }
         }
@@ -80,21 +89,30 @@ struct ContentView: View {
         case .connecting:
             Label("Connecting to \(model.connectedName ?? "device")…", systemImage: "link")
         case .connected:
-            Label("Connected to \(model.connectedName ?? "device")", systemImage: "checkmark.seal")
-                .foregroundStyle(.green)
+            Label(
+                "Connected to \(model.connectedName ?? "device")"
+                    + (model.connectedDecoder.map { " · decodable: \($0)" } ?? " · not decodable")
+                    + (model.dataStale ? " · no data" : ""),
+                systemImage: model.dataStale ? "exclamationmark.circle" : "checkmark.seal"
+            )
+            .foregroundStyle(model.dataStale ? .orange : .green)
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
         }
     }
 
     private var readout: some View {
-        HStack(spacing: 32) {
-            metric("SpO₂", model.latest?.spo2.map { String(format: "%.0f%%", $0) } ?? "—")
-            metric("Pulse", model.latest?.pulseRate.map { String(format: "%.0f", $0) } ?? "—", unit: "bpm")
-            metric("RR", model.latestRRMillis?.last.map { String(format: "%.0f", $0) } ?? "—", unit: "ms")
+        // When the link is up but streaming has stopped (dataStale), blank the values rather than leave
+        // the last reading frozen on screen — a frozen number reads as "live".
+        let m = model.dataStale ? nil : model.latest
+        let rr = model.dataStale ? nil : model.latestRRMillis
+        return HStack(spacing: 32) {
+            metric("SpO₂", m?.spo2.map { String(format: "%.0f%%", $0) } ?? "—")
+            metric("Pulse", m?.pulseRate.map { String(format: "%.0f", $0) } ?? "—", unit: "bpm")
+            metric("RR", rr?.last.map { String(format: "%.0f", $0) } ?? "—", unit: "ms")
             VStack(alignment: .leading) {
-                Text("contact \(model.latest?.contactDetected == true ? "yes" : "no")")
-                Text("quality \(model.latest?.quality.rawValue ?? "—")")
+                Text("contact \(m?.contactDetected == true ? "yes" : "no")")
+                Text("quality \(m?.quality.rawValue ?? "—")")
             }
             .font(.callout).foregroundStyle(.secondary)
         }
@@ -231,9 +249,20 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             .help("Which decoder to apply to incoming frames")
 
-            Toggle("Supported only", isOn: $model.supportedOnly)
+            Toggle("Show all", isOn: $model.showAllPassive)
                 .toggleStyle(.switch)
-                .help("Show only peripherals the engine can decode (advertise a supported service)")
+                .help("Show every BLE device (passive scan) instead of only engine-confirmed ones")
+                .onChange(of: model.showAllPassive) {
+                    if model.phase == .scanning { model.startScan() }
+                }
+
+            Toggle("Probe", isOn: $model.probeUnknowns)
+                .toggleStyle(.switch)
+                .help("Also connect to unknown devices to confirm support — intrusive, may trigger pairing prompts. Off by default; sensors that advertise their service are found without it.")
+                .disabled(model.showAllPassive)
+                .onChange(of: model.probeUnknowns) {
+                    if model.phase == .scanning { model.startScan() }
+                }
 
             if model.phase == .scanning {
                 Button("Stop", systemImage: "stop.fill", action: model.stopScan)

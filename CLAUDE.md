@@ -31,8 +31,9 @@ transport or measurement model.
 | Device info | `Parsing/DeviceInfoDecoder.swift`, `Model/DeviceInfo.swift` | DIS `0x180A` UTF-8 strings → `DeviceInfo`. |
 | Capabilities | `Model/PLXFeatures.swift` | `0x2A60` Supported-Features bitfield → `PLXFeatures`. |
 | Models | `Model/VitalsMeasurement.swift`, `Model/ConnectionState.swift`, `Model/BLEValueTypes.swift`, `Model/BLEError.swift` | Value types crossing the async boundary (all `Sendable`; UUIDs kept as strings). `VitalsMeasurement` is the shared SpO₂/PR/HR/RR reading; `contactDetected` is the generic sensor-contact flag. |
-| Device registry | `SupportedDevices.swift` | What the engine can talk to: parser list, `serviceUUIDs`, `supports(_:)`, `parser(forServiceUUIDs:)`. Engine declares capability; the app owns presentation/policy. |
-| Consumers | `Sources/SensorCLI/SensorRunner.swift`, `Sources/SensorDebugApp/DebugModel.swift` | Reference integrations — copy these patterns. |
+| Device registry | `SupportedDevices.swift` | What the engine can talk to: parser list, `serviceUUIDs`, advertised-hint `supports(_ peripheral:)` / `parser(forServiceUUIDs:)`, and the **authoritative** post-connection `parser(for: [ServiceInfo])` / `supports(_ services:)` that match a parser by service **or** characteristic. Engine declares capability; the app owns presentation/policy. |
+| Supported-device probing | `SupportedDeviceScanner.swift` | `discoverSupported(using:probe:probeTimeout:scanWindow:) -> AsyncStream<SupportedDevice>` — the stack confirms support itself. Advertised-only by default (passive, never connects); opt-in `probe` also connects to connectable unknowns once (inventory → drop) and classifies via `parser(for:)`. Already-connected supported peripherals are surfaced via `BLECentral.connectedPeripherals` (`retrieveConnectedPeripherals`). `DeviceProbing` is the testable transport seam (`BLECentral` conforms); `SupportedDevice` carries the peripheral + `.advertised`/`.probed`/`.connected` confirmation + decoder name. |
+| Consumers | `Sources/SensorCLI/SensorRunner.swift` (`scan` passive, `discover` confirmed), `Sources/SensorDebugApp/DebugModel.swift` | Reference integrations — copy these patterns. |
 
 ## Telemetry surfaces (battery + device info)
 

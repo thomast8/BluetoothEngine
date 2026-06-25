@@ -30,6 +30,36 @@ enum SensorRunner {
         central.disconnect()
     }
 
+    // MARK: discover
+
+    /// List the devices the engine can decode. Unlike `scan` (a passive full list), this surfaces only
+    /// supported devices. By default it is advertised-only (devices that advertise a known service);
+    /// with `probe`, the stack also connects to unknowns (read GATT → drop) to catch ones whose
+    /// advertisement omitted the service — intrusive, so opt-in.
+    static func discover(probe: Bool, probeTimeout: Double, scanWindow: Double) async throws {
+        let central = BLECentral()
+        try await central.waitUntilReady()
+
+        let stream = discoverSupported(using: central, probe: probe, probeTimeout: probeTimeout, scanWindow: scanWindow)
+        let consume = Task { @MainActor in
+            print(probe
+                ? "discovering supported devices (advertised + probing unknowns) — Ctrl-C to stop"
+                : "discovering supported devices (advertised only; pass --probe to also probe unknowns) — Ctrl-C to stop")
+            var seen = Set<UUID>()
+            for await found in stream {
+                guard seen.insert(found.peripheral.id).inserted else { continue }
+                let p = found.peripheral
+                let name = p.name ?? "(no name)"
+                print("\(name)  id=\(p.id)  rssi=\(p.rssi)  via=\(found.confirmation.label)  decoder=\(found.decoderName)")
+            }
+        }
+        // Ctrl-C cancels the consumer, which terminates the stream and tears the probe down.
+        let source = installInterruptHandler { consume.cancel() }
+        defer { source.cancel() }
+        await consume.value
+        central.disconnect()
+    }
+
     // MARK: explore
 
     static func explore(match: PeripheralMatch, timeout: Double, json: Bool) async throws {
@@ -102,7 +132,9 @@ enum SensorRunner {
         case "plxs": parser = PLXSParser()
         case "hrs": parser = HeartRateParser()
         case "proprietary": parser = ProprietaryPM100Parser()
-        default: parser = SupportedDevices.parser(forServiceUUIDs: services.map(\.uuid))
+        // `auto`: match the discovered GATT (service OR characteristic), so a standard characteristic
+        // under a vendor service still decodes.
+        default: parser = SupportedDevices.parser(for: services)
         }
         guard let parser else {
             central.disconnect()

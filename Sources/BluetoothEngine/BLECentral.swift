@@ -16,13 +16,17 @@ public final class BLECentral: NSObject {
     // Power-state readiness.
     private var readyWaiters: [CheckedContinuation<Void, Error>] = []
 
-    // Scanning.
+    // Scanning. `scanGeneration` increments per `scan()` so a stale stream's async teardown can be
+    // told it's been superseded (see `stopScanning(generation:)`).
     private var scanContinuation: AsyncStream<DiscoveredPeripheral>.Continuation?
+    private var scanGeneration = 0
 
-    // Connecting.
+    // Connecting. `connectGeneration` increments per `connect()` so a superseded attempt's timeout /
+    // delegate callbacks can be told they no longer own the connection (switching devices quickly).
     private var connectContinuation: CheckedContinuation<Void, Error>?
     private var pendingMatch: ((CBPeripheral, [String: Any]) -> Bool)?
     private var peripheral: CBPeripheral?
+    private var connectGeneration = 0
 
     // Discovery steps (continuation per in-flight request).
     private var discoverServicesWaiter: CheckedContinuation<Void, Error>?
@@ -100,8 +104,13 @@ public final class BLECentral: NSObject {
 
     /// Resume every in-flight continuation so an unexpected disconnect / power-off cannot hang an
     /// awaiting connect / inventory / read. Read waiters resume with nil (their continuation can't throw).
-    private func failAllPending(_ error: Error) {
-        if let cont = connectContinuation { connectContinuation = nil; cont.resume(throwing: error) }
+    ///
+    /// `includingConnect` governs the *connect* continuation. A peripheral disconnecting must NOT fail an
+    /// in-flight `connect()` — a connect is driven by its own `didConnect`/`didFailToConnect`/timeout, and
+    /// the disconnecting peripheral may be a stale one (e.g. a probe being torn down) that has nothing to
+    /// do with the new connect. Terminal power states still pass `true`, since no connect can proceed then.
+    private func failAllPending(_ error: Error, includingConnect: Bool = true) {
+        if includingConnect, let cont = connectContinuation { connectContinuation = nil; cont.resume(throwing: error) }
         if let cont = discoverServicesWaiter { discoverServicesWaiter = nil; cont.resume(throwing: error) }
         let chars = discoverCharsWaiters; discoverCharsWaiters.removeAll()
         chars.values.forEach { $0.resume(throwing: error) }
@@ -116,11 +125,18 @@ public final class BLECentral: NSObject {
 
     /// Stream of discovered peripherals. Allows duplicates so RSSI keeps refreshing. Call
     /// `waitUntilReady()` first. Finishing the stream (or `finishActiveStreams()`) stops the scan.
+    ///
+    /// A monotonic generation tags each scan so the previous stream's *asynchronous* teardown can't
+    /// stop or nil a newer scan — important when a caller reopens scans back-to-back (e.g. the probing
+    /// discovery loop): the old `onTermination` may not run until after the new `scan()` has already
+    /// installed its continuation.
     public func scan(filterServices: [CBUUID]? = nil) -> AsyncStream<DiscoveredPeripheral> {
+        scanGeneration += 1
+        let generation = scanGeneration
         let (stream, continuation) = AsyncStream<DiscoveredPeripheral>.makeStream()
         scanContinuation = continuation
         continuation.onTermination = { [weak self] _ in
-            Task { @MainActor in self?.stopScanning() }
+            Task { @MainActor in self?.stopScanning(generation: generation) }
         }
         manager.scanForPeripherals(
             withServices: filterServices,
@@ -129,17 +145,65 @@ public final class BLECentral: NSObject {
         return stream
     }
 
-    private func stopScanning() {
+    /// Stop scanning on behalf of a finished scan stream. A `generation` older than the current scan
+    /// means a newer scan has superseded this one — do nothing, so we don't tear down the new scan.
+    private func stopScanning(generation: Int? = nil) {
+        if let generation, generation != scanGeneration { return }
         if manager.state == .poweredOn { manager.stopScan() }
         scanContinuation = nil
     }
 
     // MARK: - Connecting
 
-    /// Scan for and connect to the first peripheral matching `match`, or throw on timeout.
+    /// Connect to the peripheral matching `match`, or throw on timeout. For `.id`, reconnect to the
+    /// known peripheral directly (no scan) — required because a peripheral that is already connected, or
+    /// being switched to, won't reappear in scan results; `.name` (and an id CoreBluetooth can't
+    /// retrieve) fall back to scanning. Any previously-held peripheral is dropped first so the
+    /// single-session slot is free and a switch isn't blocked by the old link.
     public func connect(matching match: PeripheralMatch, timeout: TimeInterval) async throws {
         try await waitUntilReady()
+
+        connectGeneration += 1
+        let generation = connectGeneration
+
+        // Supersede an in-flight connect from a previous call (e.g. switching devices quickly) so its
+        // continuation can't linger; its timeout is already neutralised by the generation bump.
+        if let stale = connectContinuation {
+            connectContinuation = nil
+            stale.resume(throwing: BLEError.connectionFailed(reason: "superseded by a new connection"))
+        }
+
+        // Drop the current peripheral unless we're reconnecting to it — frees the slot and resolves any
+        // inventory/reads still pending on it (so the previous session's task unwinds, not leaks).
+        if let existing = peripheral {
+            var sameTarget = false
+            if case .id(let uuid) = match, existing.identifier == uuid { sameTarget = true }
+            if !sameTarget {
+                peripheral = nil
+                failAllPending(BLEError.connectionFailed(reason: "superseded by a new connection"), includingConnect: false)
+                manager.cancelPeripheralConnection(existing)
+            }
+        }
+
         connectionStateContinuation?.yield(.connecting)
+        // Connecting opens its own scan epoch. Bumping the generation invalidates any prior discovery
+        // scan's still-pending async teardown so it can't `stopScan()` out from under this connect.
+        scanGeneration += 1
+
+        // Fast path: reconnect to a known peripheral by identifier, no scan.
+        if case .id(let uuid) = match,
+           let known = manager.retrievePeripherals(withIdentifiers: [uuid]).first {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                connectContinuation = cont
+                peripheral = known
+                known.delegate = self
+                manager.connect(known, options: nil)
+                armConnectTimeout(timeout, generation: generation, query: match.description)
+            }
+            return
+        }
+
+        // Fallback: scan for the match (covers `.name`, and an id CoreBluetooth can't retrieve).
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             connectContinuation = cont
             pendingMatch = { peripheral, adv in
@@ -153,20 +217,51 @@ public final class BLECentral: NSObject {
                 }
             }
             manager.scanForPeripherals(withServices: nil, options: nil)
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(timeout))
-                guard let pending = self.connectContinuation else { return }
-                self.connectContinuation = nil
-                self.pendingMatch = nil
-                if self.manager.state == .poweredOn { self.manager.stopScan() }
-                pending.resume(throwing: BLEError.deviceNotFound(query: match.description))
-            }
+            armConnectTimeout(timeout, generation: generation, query: match.description)
+        }
+    }
+
+    /// Fail the pending connect with `deviceNotFound` after `timeout`, unless it has resolved or been
+    /// superseded by a newer connect (the `generation` guard makes a stale timeout a no-op).
+    private func armConnectTimeout(_ timeout: TimeInterval, generation: Int, query: String) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(timeout))
+            guard generation == self.connectGeneration, let pending = self.connectContinuation else { return }
+            self.connectContinuation = nil
+            self.pendingMatch = nil
+            if self.manager.state == .poweredOn { self.manager.stopScan() }
+            pending.resume(throwing: BLEError.deviceNotFound(query: query))
         }
     }
 
     public func disconnect() {
         if manager.state == .poweredOn { manager.stopScan() }
         if let peripheral { manager.cancelPeripheralConnection(peripheral) }
+    }
+
+    /// Peripherals already connected (to this app or the system) exposing any of `serviceUUIDs`, each
+    /// tagged with the matched service UUID(s) in `advertisedServices`. A connected peripheral stops
+    /// advertising, so a scan can't find it — this surfaces it so discovery can still list it (and an
+    /// app can reconnect). Querying per service records which one(s) each peripheral has, so the
+    /// caller can pick the right decoder. `rssi` is 0 (unknown without a scan/read).
+    public func connectedPeripherals(withServices serviceUUIDs: [CBUUID]) -> [DiscoveredPeripheral] {
+        var servicesByID: [UUID: [String]] = [:]
+        var nameByID: [UUID: String?] = [:]
+        for service in serviceUUIDs {
+            for p in manager.retrieveConnectedPeripherals(withServices: [service]) {
+                servicesByID[p.identifier, default: []].append(service.uuidString)
+                nameByID[p.identifier] = p.name
+            }
+        }
+        return servicesByID.map { id, services in
+            DiscoveredPeripheral(
+                id: id,
+                name: nameByID[id].flatMap { $0 },
+                rssi: 0,
+                advertisedServices: services,
+                isConnectable: true
+            )
+        }
     }
 
     // MARK: - Discovery / inventory
@@ -413,7 +508,11 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        self.peripheral = peripheral
+        // A late connect for a device we've already switched away from: drop it, don't adopt it.
+        guard self.peripheral === peripheral else {
+            manager.cancelPeripheralConnection(peripheral)
+            return
+        }
         peripheral.delegate = self
         connectionStateContinuation?.yield(.connected)
         let cont = connectContinuation
@@ -426,6 +525,9 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
+        // Ignore a failure for a peripheral we're no longer targeting (superseded by a newer connect).
+        guard self.peripheral === peripheral else { return }
+        self.peripheral = nil
         connectionStateContinuation?.yield(.disconnected(reason: error?.localizedDescription))
         let cont = connectContinuation
         connectContinuation = nil
@@ -437,9 +539,17 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
+        // Only react to the peripheral we currently hold. A disconnect for a device we've already
+        // switched away from (we dropped it explicitly in `connect`) must not tear down streams or fail
+        // pending work on the new connection.
+        guard self.peripheral === peripheral else { return }
         self.peripheral = nil
         connectionStateContinuation?.yield(.disconnected(reason: error?.localizedDescription))
-        failAllPending(BLEError.connectionFailed(reason: error?.localizedDescription ?? "peripheral disconnected"))
+        // A disconnect fails in-flight inventory/reads but must not clobber a *new* connect attempt.
+        failAllPending(
+            BLEError.connectionFailed(reason: error?.localizedDescription ?? "peripheral disconnected"),
+            includingConnect: false
+        )
         finishActiveStreams()
     }
 }

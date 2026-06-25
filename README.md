@@ -16,10 +16,17 @@ standalone biofeedback input for breath-hold / apnea training.
   (`0x180A`), `PLXFeatures` (`0x2A60`), link `connectionStates()` and `readRSSI()` — kept off
   `VitalsMeasurement` so decoders stay stateless. `SupportedDevices` declares what the engine can talk
   to (so an app can scan filtered to compatible devices instead of listing every AirPod in the room).
-  The engine declares capability; the app owns presentation/policy.
-- **`sensor`** (CLI) — `doctor` / `scan` / `explore` / `raw` (timestamped hex + CSV capture) / `decode`
-  (SpO₂ + pulse rate, plus heart rate + RR-intervals for HR bands, and live battery) / `info` (read-once
-  device info, PLX features, battery, RSSI).
+  Support is judged **structurally** against the registered parsers — a device matches if its GATT
+  exposes a service *or* characteristic any parser decodes (`SupportedDevices.parser(for:)`), so a new
+  device is recognised by structure, never by a hard-coded name/model. `discoverSupported(using:)` puts
+  this in the stack: by default it surfaces devices that *advertise* a known service (a passive scan that
+  never connects); an opt-in `probe` mode additionally connects to connectable unknowns (read GATT →
+  drop) to confirm a device whose advertisement omits its service, and already-connected devices are
+  surfaced too. The engine declares capability; the app owns presentation/policy.
+- **`sensor`** (CLI) — `doctor` / `scan` (passive: every BLE device) / `discover` (only devices the
+  engine can decode, probing unknowns to confirm) / `explore` / `raw` (timestamped hex + CSV capture) /
+  `decode` (SpO₂ + pulse rate, plus heart rate + RR-intervals for HR bands, and live battery) / `info`
+  (read-once device info, PLX features, battery, RSSI).
 - **`sensor-debug`** (SwiftUI app) — scan/connect, live decoded SpO₂/PR (+ HR/RR), battery + device
   telemetry, raw hex log, GATT tree. Streams every event over loopback SSE (`http://127.0.0.1:8787/`)
   and to `~/Library/Logs/SensorDebug/session.jsonl`, so a session is observable live without reading the GUI.

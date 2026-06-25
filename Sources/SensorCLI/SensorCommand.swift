@@ -10,11 +10,12 @@ struct SensorCommand: AsyncParsableCommand {
         abstract: "Bluetooth LE pulse-oximeter sniffer and protocol explorer.",
         discussion: """
         Reverse-engineering tooling for BLE oximeters (e.g. Medisana PM100). Typical flow: \
-        `doctor` (grant Bluetooth) → `scan` (find the device) → `explore` (map its GATT) → \
-        `raw --csv` (capture frames) → `decode` (parse live). The Bluetooth permission prompt is \
-        attributed to the terminal app running `sensor`, not to `sensor` itself.
+        `doctor` (grant Bluetooth) → `scan` (list everything) or `discover` (only devices the engine \
+        can decode) → `explore` (map its GATT) → `raw --csv` (capture frames) → `decode` (parse live). \
+        The Bluetooth permission prompt is attributed to the terminal app running `sensor`, not to \
+        `sensor` itself.
         """,
-        subcommands: [Doctor.self, Scan.self, Explore.self, Raw.self, Decode.self, Info.self],
+        subcommands: [Doctor.self, Scan.self, Discover.self, Explore.self, Raw.self, Decode.self, Info.self],
         defaultSubcommand: Scan.self
     )
 }
@@ -69,6 +70,30 @@ struct Scan: AsyncParsableCommand {
     func run() async throws {
         do {
             try await SensorRunner.scan(nameFilter: name)
+        } catch {
+            throw failing(error)
+        }
+    }
+}
+
+struct Discover: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "discover",
+        abstract: "List devices the engine can decode (those advertising a supported service)."
+    )
+
+    @Flag(name: .long, help: "Also connect to unknown peripherals to confirm support. Intrusive: reaches out to nearby devices and can trigger pairing prompts.")
+    var probe: Bool = false
+
+    @Option(name: .long, help: "Seconds to wait when probing an unknown peripheral (with --probe).")
+    var probeTimeout: Double = 6
+
+    @Option(name: .long, help: "Seconds per scan window between probes (with --probe).")
+    var scanWindow: Double = 4
+
+    func run() async throws {
+        do {
+            try await SensorRunner.discover(probe: probe, probeTimeout: probeTimeout, scanWindow: scanWindow)
         } catch {
             throw failing(error)
         }
