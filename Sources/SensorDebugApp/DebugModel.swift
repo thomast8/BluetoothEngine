@@ -172,7 +172,7 @@ final class DebugModel {
         // Dumb consumer: just ask the engine to connect. The engine arbitrates the single-session radio
         // (scan vs connect) and rate-limits connect churn itself. We only tear down the previous session's
         // measurement-stream tasks/readout here, since that streaming lifecycle is the app's, not the
-        // engine's. (Clicking the already-connected device simply reconnects — a harmless refresh.)
+        // engine's. The engine makes duplicate connects idempotent and serializes switches safely.
         connectTask?.cancel()
         connectionTask?.cancel()
         rssiTask?.cancel()
