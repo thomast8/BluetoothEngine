@@ -134,16 +134,23 @@ struct Raw: AsyncParsableCommand {
     @Option(name: .shortAndLong, help: "Write capture to this file (flushed on Ctrl-C). If omitted, prints to stdout.")
     var out: String?
 
+    @Option(name: .long, help: "Maximum bytes to write to --out before later frames are dropped.")
+    var maxBytes: Int = CaptureLimits.defaultMaxBytes
+
     @Option(name: .long, help: "Limit to these characteristic UUIDs (repeatable). Default: all notifying chars.")
     var char: [String] = []
 
     func run() async throws {
+        guard maxBytes > 0 else {
+            throw ValidationError("--max-bytes must be greater than 0")
+        }
         do {
             try await SensorRunner.raw(
                 match: try selector.match(),
                 timeout: selector.timeout,
                 csv: csv,
                 out: out,
+                maxBytes: maxBytes,
                 chars: char.isEmpty ? nil : char
             )
         } catch {

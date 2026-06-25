@@ -12,7 +12,7 @@ public func vitalsMeasurements(
     from notifications: AsyncStream<RawNotification>,
     parser: MeasurementParser
 ) -> AsyncStream<VitalsMeasurement> {
-    AsyncStream { continuation in
+    AsyncStream(bufferingPolicy: .bufferingNewest(BLEStreamLimits.decodedMeasurements)) { continuation in
         let task = Task {
             for await note in notifications {
                 let characteristic = CBUUID(string: note.characteristicUUID)

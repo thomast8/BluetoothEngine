@@ -88,12 +88,12 @@ enum SensorRunner {
 
     // MARK: raw
 
-    static func raw(match: PeripheralMatch, timeout: Double, csv: Bool, out: String?, chars: [String]?) async throws {
+    static func raw(match: PeripheralMatch, timeout: Double, csv: Bool, out: String?, maxBytes: Int, chars: [String]?) async throws {
         let central = BLECentral()
         try await central.connect(matching: match, timeout: timeout)
 
         let header = csv ? "t_mono_s,t_wall_iso,char_uuid,len,hex" : nil
-        let writer = try out.map { try CaptureWriter(path: $0, header: header) }
+        let writer = try out.map { try CaptureWriter(path: $0, header: header, maxBytes: maxBytes) }
         if writer == nil, let header { print(header) }
 
         let source = installInterruptHandler { Task { @MainActor in central.finishActiveStreams() } }

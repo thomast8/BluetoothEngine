@@ -9,13 +9,19 @@ import Foundation
 /// queue with fsync per line, so a `tail -F` / `curl -N` sees events immediately. `@unchecked Sendable`
 /// is sound: the file descriptor is written exclusively on that queue and is immutable after init.
 final class SessionLogger: @unchecked Sendable {
+    private static let defaultLogMaxBytes = 50 * 1024 * 1024
+
     let url: URL
     let server: DebugStreamServer
     private let fd: Int32
     private let queue = DispatchQueue(label: "com.breathsynth.SessionLogger")
+    private let maxBytes: Int
+    private var bytesWritten = 0
+    private var limitNoticeWritten = false
 
     init() {
         let env = ProcessInfo.processInfo.environment
+        maxBytes = Self.maxBytes(from: env["SENSOR_DEBUG_LOG_MAX_BYTES"])
         if let override = env["SENSOR_DEBUG_LOG"], !override.isEmpty {
             url = URL(fileURLWithPath: override)
         } else {
@@ -48,10 +54,31 @@ final class SessionLogger: @unchecked Sendable {
         let line = String(decoding: data, as: UTF8.self)
         server.broadcast(line)
         guard fd >= 0 else { return }
-        queue.async { [fd] in
+        queue.async { [self, fd] in
+            let lineBytes = data.count + 1
+            guard self.bytesWritten + lineBytes <= self.maxBytes else {
+                if !self.limitNoticeWritten {
+                    self.limitNoticeWritten = true
+                    let notice = Data("{\"event\":\"log_truncated\",\"reason\":\"byte_limit\"}\n".utf8)
+                    if self.bytesWritten + notice.count <= self.maxBytes {
+                        _ = notice.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+                        self.bytesWritten += notice.count
+                        fsync(fd)
+                    }
+                }
+                return
+            }
             _ = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
             _ = [UInt8(0x0A)].withUnsafeBytes { write(fd, $0.baseAddress, 1) }
+            self.bytesWritten += lineBytes
             fsync(fd)
         }
+    }
+
+    private static func maxBytes(from value: String?) -> Int {
+        guard let value, let parsed = Int(value), parsed > 0 else {
+            return defaultLogMaxBytes
+        }
+        return parsed
     }
 }
