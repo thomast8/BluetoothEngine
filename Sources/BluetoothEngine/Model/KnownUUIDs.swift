@@ -24,6 +24,14 @@ public enum KnownUUIDs {
     public static var batteryService: CBUUID { CBUUID(string: "180F") }
     public static var batteryLevel: CBUUID { CBUUID(string: "2A19") }
 
+    // Device Information Service (0x180A) characteristics — read-once identity strings.
+    public static var manufacturerName: CBUUID { CBUUID(string: "2A29") }
+    public static var modelNumber: CBUUID { CBUUID(string: "2A24") }
+    public static var serialNumber: CBUUID { CBUUID(string: "2A25") }
+    public static var firmwareRevision: CBUUID { CBUUID(string: "2A26") }
+    public static var hardwareRevision: CBUUID { CBUUID(string: "2A27") }
+    public static var softwareRevision: CBUUID { CBUUID(string: "2A28") }
+
     /// Human-readable name for a known UUID, or nil for vendor/proprietary UUIDs.
     public static func name(for uuid: CBUUID) -> String? {
         switch uuid {
@@ -37,6 +45,12 @@ public enum KnownUUIDs {
         case deviceInformation: return "Device Information"
         case batteryService: return "Battery Service"
         case batteryLevel: return "Battery Level"
+        case manufacturerName: return "Manufacturer Name"
+        case modelNumber: return "Model Number"
+        case serialNumber: return "Serial Number"
+        case firmwareRevision: return "Firmware Revision"
+        case hardwareRevision: return "Hardware Revision"
+        case softwareRevision: return "Software Revision"
         default: return nil
         }
     }

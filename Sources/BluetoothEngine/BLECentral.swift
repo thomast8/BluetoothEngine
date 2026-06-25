@@ -35,6 +35,12 @@ public final class BLECentral: NSObject {
     private var notificationListeners: [Int: AsyncStream<RawNotification>.Continuation] = [:]
     private var nextListenerID = 0
 
+    // One-shot RSSI read.
+    private var rssiWaiter: CheckedContinuation<Int?, Never>?
+
+    // Link-lifecycle observation (single observer; replaced on re-subscribe).
+    private var connectionStateContinuation: AsyncStream<ConnectionState>.Continuation?
+
     public override init() {
         super.init()
         manager = CBCentralManager(delegate: self, queue: nil)
@@ -103,6 +109,7 @@ public final class BLECentral: NSObject {
         descs.values.forEach { $0.resume(throwing: error) }
         let reads = readWaiters; readWaiters.removeAll()
         reads.values.forEach { $0.resume(returning: nil) }
+        if let cont = rssiWaiter { rssiWaiter = nil; cont.resume(returning: nil) }
     }
 
     // MARK: - Scanning
@@ -132,6 +139,7 @@ public final class BLECentral: NSObject {
     /// Scan for and connect to the first peripheral matching `match`, or throw on timeout.
     public func connect(matching match: PeripheralMatch, timeout: TimeInterval) async throws {
         try await waitUntilReady()
+        connectionStateContinuation?.yield(.connecting)
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             connectContinuation = cont
             pendingMatch = { peripheral, adv in
@@ -271,6 +279,79 @@ public final class BLECentral: NSObject {
         listeners.values.forEach { $0.finish() }
     }
 
+    // MARK: - Targeted reads (battery / device info / features)
+
+    /// Read several characteristics by UUID in a single discovery pass. Characteristics that are
+    /// absent or lack the `.read` property are omitted. Reads run sequentially so the shared
+    /// read-waiter map (keyed by UUID) can't collide with itself. Use the typed wrappers below for the
+    /// common cases.
+    ///
+    /// Invariant (load-bearing): call this *before* `subscribe(...)`. CoreBluetooth delivers read
+    /// responses and notifications through the same `didUpdateValueFor` callback, so a notification
+    /// arriving on a UUID with a read in flight would satisfy (and be consumed by) that read instead of
+    /// fanning out. This matters for the Battery Level characteristic, which both reads and notifies:
+    /// read it once up front, then rely on `batteryLevels(from:)` for changes.
+    public func readCharacteristics(_ uuids: [CBUUID]) async throws -> [CBUUID: Data] {
+        guard let peripheral else { throw BLEError.notConnected }
+        let wanted = Set(uuids)
+        guard !wanted.isEmpty else { return [:] }
+        try await discoverServices(peripheral)
+        var result: [CBUUID: Data] = [:]
+        for service in peripheral.services ?? [] {
+            try await discoverCharacteristics(peripheral, service)
+            for ch in service.characteristics ?? []
+            where wanted.contains(ch.uuid) && ch.properties.contains(.read) {
+                if let value = await readValue(peripheral, ch) { result[ch.uuid] = value }
+            }
+        }
+        return result
+    }
+
+    /// Current battery level (`0x2A19`), or nil if the device exposes no readable battery.
+    public func readBatteryLevel() async throws -> Int? {
+        let values = try await readCharacteristics([KnownUUIDs.batteryLevel])
+        return values[KnownUUIDs.batteryLevel].flatMap(BatteryDecoder.level)
+    }
+
+    /// Device Information Service (`0x180A`) identity, read once. Absent fields stay nil.
+    public func readDeviceInfo() async throws -> DeviceInfo {
+        let values = try await readCharacteristics(DeviceInfoDecoder.characteristicUUIDs)
+        return DeviceInfoDecoder.decode(values)
+    }
+
+    /// PLX Features (`0x2A60`) capability bitfield, or nil if the device doesn't expose it.
+    public func readPLXFeatures() async throws -> PLXFeatures? {
+        let values = try await readCharacteristics([KnownUUIDs.plxFeatures])
+        return values[KnownUUIDs.plxFeatures].flatMap(PLXFeatures.decode)
+    }
+
+    // MARK: - Link quality / lifecycle
+
+    /// Read the current RSSI of the connected link, or nil if not connected / on error. Poll on a
+    /// timer for a live signal-strength readout.
+    public func readRSSI() async -> Int? {
+        guard let peripheral else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<Int?, Never>) in
+            // Single in-flight slot: resume any stale waiter before replacing it so a continuation is
+            // never overwritten unresumed. `failAllPending` also drains it on disconnect/power-off, so
+            // the only residual stall is a CoreBluetooth read that silently never calls back — bounded
+            // by the next `readRSSI` (the debug app polls on a timer).
+            if let existing = rssiWaiter { rssiWaiter = nil; existing.resume(returning: nil) }
+            rssiWaiter = cont
+            peripheral.readRSSI()
+        }
+    }
+
+    /// Observe link lifecycle (`connecting` / `connected` / `disconnected`). A single observer; a
+    /// second call replaces (and finishes) the first. Set this up before `connect` to catch the
+    /// first transition. The engine does not auto-reconnect — re-invoke `connect` after a drop.
+    public func connectionStates() -> AsyncStream<ConnectionState> {
+        connectionStateContinuation?.finish()
+        let (stream, continuation) = AsyncStream<ConnectionState>.makeStream()
+        connectionStateContinuation = continuation
+        return stream
+    }
+
     // MARK: - Helpers
 
     private static func describe(_ state: CBManagerState) -> String {
@@ -334,6 +415,7 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         self.peripheral = peripheral
         peripheral.delegate = self
+        connectionStateContinuation?.yield(.connected)
         let cont = connectContinuation
         connectContinuation = nil
         cont?.resume()
@@ -344,6 +426,7 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
+        connectionStateContinuation?.yield(.disconnected(reason: error?.localizedDescription))
         let cont = connectContinuation
         connectContinuation = nil
         cont?.resume(throwing: BLEError.connectionFailed(reason: error?.localizedDescription ?? "unknown"))
@@ -355,12 +438,19 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate {
         error: Error?
     ) {
         self.peripheral = nil
+        connectionStateContinuation?.yield(.disconnected(reason: error?.localizedDescription))
         failAllPending(BLEError.connectionFailed(reason: error?.localizedDescription ?? "peripheral disconnected"))
         finishActiveStreams()
     }
 }
 
 extension BLECentral: @preconcurrency CBPeripheralDelegate {
+    public func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        let cont = rssiWaiter
+        rssiWaiter = nil
+        cont?.resume(returning: error == nil ? RSSI.intValue : nil)
+    }
+
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         let cont = discoverServicesWaiter
         discoverServicesWaiter = nil

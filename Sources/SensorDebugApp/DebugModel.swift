@@ -32,8 +32,12 @@ final class DebugModel {
     private let central = BLECentral()
     private let logger = SessionLogger()
     private var scanTask: Task<Void, Never>?
+    private var connectTask: Task<Void, Never>?
     private var rawTask: Task<Void, Never>?
     private var measureTask: Task<Void, Never>?
+    private var batteryTask: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
+    private var rssiTask: Task<Void, Never>?
 
     var phase: Phase = .idle
     var authorization: String = ""
@@ -44,6 +48,12 @@ final class DebugModel {
     /// Last RR-interval set seen. Heart-rate frames carry RR only sporadically, so hold the previous
     /// value rather than blanking the readout on every plain (RR-less) HR frame.
     var latestRRMillis: [Double]?
+    // Read-once + streamed device telemetry alongside the measurement readout.
+    var battery: Int?
+    var deviceInfo: DeviceInfo?
+    var features: PLXFeatures?
+    var rssi: Int?
+    var connectionState: ConnectionState?
     var log: [LogLine] = []
     var parserChoice: ParserChoice = .auto
     /// When on, the device list shows only peripherals the engine can decode (debug app shows all by
@@ -117,31 +127,95 @@ final class DebugModel {
         latestRRMillis = nil
         connectedName = device.name ?? device.id.uuidString
         logger.log("connecting", ["id": device.id.uuidString, "name": connectedName ?? NSNull()])
-        Task { @MainActor in
+        observeConnectionState() // before connect, so the first transition isn't missed
+        connectTask = Task { @MainActor in
             do {
                 try await self.central.connect(matching: .id(device.id), timeout: 15)
                 self.services = try await self.central.inventory(readValues: true)
                 self.phase = .connected
                 self.logger.log("connected", ["name": self.connectedName ?? NSNull()])
                 self.logger.log("gatt", ["services": self.gattJSON()])
+                await self.readTelemetry()
                 self.startStreaming()
             } catch {
-                self.fail(error)
+                // A user-initiated disconnect mid-connect cancels this task; don't flash `.failed`
+                // over the `.idle` that `disconnect()` already set.
+                if !Task.isCancelled { self.fail(error) }
             }
         }
     }
 
     func disconnect() {
+        connectTask?.cancel()
+        connectionTask?.cancel()
         rawTask?.cancel()
         measureTask?.cancel()
+        batteryTask?.cancel()
+        rssiTask?.cancel()
         central.finishActiveStreams()
         central.disconnect()
         phase = .idle
         services = []
         latest = nil
         latestRRMillis = nil
+        battery = nil
+        deviceInfo = nil
+        features = nil
+        rssi = nil
+        connectionState = nil
         connectedName = nil
         logger.log("disconnect")
+    }
+
+    /// Mirror the engine's link lifecycle into `phase`, so an unexpected drop is reflected in the UI.
+    /// (Cancelled in `disconnect` before we cancel the link, so a user-initiated disconnect doesn't
+    /// flash a spurious "failed".)
+    private func observeConnectionState() {
+        let states = central.connectionStates()
+        connectionTask?.cancel()
+        connectionTask = Task { @MainActor in
+            for await state in states {
+                self.connectionState = state
+                self.logger.log("connection", ["state": Self.describe(state)])
+                if case .disconnected(let reason) = state {
+                    // Stop the RSSI poll loop (it isn't stream-backed, so it won't self-terminate the
+                    // way the measurement/battery tasks do when the notification streams finish).
+                    self.rssiTask?.cancel()
+                    if self.phase == .connected || self.phase == .connecting {
+                        self.phase = .failed(reason ?? "disconnected")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Read-once telemetry on connect: device identity, capabilities, battery, and link RSSI.
+    private func readTelemetry() async {
+        let info = (try? await central.readDeviceInfo()) ?? DeviceInfo()
+        deviceInfo = info.isEmpty ? nil : info
+        features = (try? await central.readPLXFeatures()) ?? nil
+        battery = (try? await central.readBatteryLevel()) ?? nil
+        rssi = await central.readRSSI()
+        let infoFields: [String: Any] = [
+            "manufacturer": info.manufacturerName ?? NSNull(),
+            "model": info.modelNumber ?? NSNull(),
+            "serial": info.serialNumber ?? NSNull(),
+            "firmware": info.firmwareRevision ?? NSNull(),
+            "hardware": info.hardwareRevision ?? NSNull(),
+            "software": info.softwareRevision ?? NSNull(),
+        ]
+        logger.log("device_info", infoFields)
+        logger.log("plx_features", ["value": features?.shortDescription ?? NSNull(), "raw": features.map { Int($0.raw) } ?? NSNull()])
+        logger.log("battery", ["level": battery ?? NSNull()])
+        logger.log("rssi", ["dbm": rssi ?? NSNull()])
+    }
+
+    private static func describe(_ state: ConnectionState) -> String {
+        switch state {
+        case .connecting: return "connecting"
+        case .connected: return "connected"
+        case .disconnected(let reason): return reason.map { "disconnected: \($0)" } ?? "disconnected"
+        }
     }
 
     func clearLog() {
@@ -211,6 +285,26 @@ final class DebugModel {
         } else {
             // `auto` found no decoder for this device — stream raw frames only, don't fake measurements.
             logger.log("no_decoder", ["choice": parserChoice.rawValue])
+        }
+
+        // Battery change notifications ride the same fan-out (subscribe(nil) below enables 0x2A19).
+        let batteryStream = batteryLevels(from: central.notifications())
+        batteryTask = Task { @MainActor in
+            for await level in batteryStream {
+                self.battery = level
+                self.logger.log("battery", ["level": level])
+            }
+        }
+
+        // Poll link RSSI for a live signal-strength readout (the engine exposes a one-shot read).
+        rssiTask = Task { @MainActor in
+            while !Task.isCancelled {
+                if let value = await self.central.readRSSI() {
+                    self.rssi = value
+                    self.logger.log("rssi", ["dbm": value])
+                }
+                try? await Task.sleep(for: .seconds(3))
+            }
         }
 
         Task { @MainActor in

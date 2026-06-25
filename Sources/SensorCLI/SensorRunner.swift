@@ -116,12 +116,29 @@ enum SensorRunner {
             ))
         }
 
+        // Read-once telemetry header (best-effort: never block decoding on a missing optional service).
+        let info = (try? await central.readDeviceInfo()) ?? DeviceInfo()
+        let features = (try? await central.readPLXFeatures()) ?? nil
+        let battery = (try? await central.readBatteryLevel()) ?? nil
+        printTelemetry(info: info, features: features, battery: battery)
+
         let source = installInterruptHandler { Task { @MainActor in central.finishActiveStreams() } }
         defer { source.cancel() }
 
-        let targets = parser.characteristicUUIDs.map { $0.uuidString }
+        // Register both listeners before subscribing so no early frame is missed. Battery rides the
+        // same raw-notification fan-out as measurements; include 0x2A19 in the subscribe targets so
+        // change notifications flow (when the device notifies; the read above covers the initial value).
+        let measurementTargets = parser.characteristicUUIDs.map { $0.uuidString }
+        let subscribeTargets: [String]? = measurementTargets.isEmpty
+            ? nil // empty → subscribe to every notifying characteristic (battery included)
+            : measurementTargets + [KnownUUIDs.batteryLevel.uuidString]
+
         let stream = vitalsMeasurements(from: central.notifications(), parser: parser)
-        try await central.subscribe(characteristics: targets.isEmpty ? nil : targets)
+        let batteryStream = batteryLevels(from: central.notifications())
+        let batteryTask = Task { @MainActor in
+            for await level in batteryStream { print("battery \(level)%") }
+        }
+        try await central.subscribe(characteristics: subscribeTargets)
         print("decoding with \(type(of: parser)) — Ctrl-C to stop")
 
         for await m in stream {
@@ -132,8 +149,39 @@ enum SensorRunner {
             } ?? ""
             print("SpO2 \(spo2)  PR \(pr)\(rr)  contact=\(m.contactDetected)  q=\(m.quality.rawValue)")
         }
+        batteryTask.cancel()
         central.disconnect()
     }
+
+    // MARK: info
+
+    static func info(match: PeripheralMatch, timeout: Double) async throws {
+        let central = BLECentral()
+        try await central.connect(matching: match, timeout: timeout)
+        let info = try await central.readDeviceInfo()
+        let features = try await central.readPLXFeatures()
+        let battery = try await central.readBatteryLevel()
+        let rssi = await central.readRSSI()
+        central.disconnect()
+        printTelemetry(info: info, features: features, battery: battery, rssi: rssi)
+    }
+}
+
+/// Print a device's read-once telemetry (identity / capabilities / battery / link) as aligned rows.
+private func printTelemetry(info: DeviceInfo, features: PLXFeatures?, battery: Int?, rssi: Int? = nil) {
+    func row(_ label: String, _ value: String?) {
+        guard let value else { return }
+        print("\(label.padding(toLength: 14, withPad: " ", startingAt: 0))\(value)")
+    }
+    row("manufacturer:", info.manufacturerName)
+    row("model:", info.modelNumber)
+    row("serial:", info.serialNumber)
+    row("firmware:", info.firmwareRevision)
+    row("hardware:", info.hardwareRevision)
+    row("software:", info.softwareRevision)
+    row("plx features:", features?.shortDescription)
+    row("battery:", battery.map { "\($0)%" })
+    row("rssi:", rssi.map { "\($0) dBm" })
 }
 
 /// Minimal Encodable view of a service tree for `explore --json`.

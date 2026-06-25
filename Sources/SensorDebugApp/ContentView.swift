@@ -58,6 +58,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             statusLine
             readout
+            telemetry
             Divider()
             HStack(alignment: .top, spacing: 16) {
                 logView
@@ -96,6 +97,63 @@ struct ContentView: View {
                 Text("quality \(model.latest?.quality.rawValue ?? "—")")
             }
             .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Device telemetry row: battery / link / identity / capabilities, shown once connected.
+    @ViewBuilder private var telemetry: some View {
+        if model.phase == .connected {
+            HStack(spacing: 20) {
+                // Battery — prominent, with a level-aware icon so it reads as a real indicator.
+                HStack(spacing: 6) {
+                    Image(systemName: batterySymbol(model.battery))
+                        .imageScale(.large)
+                        .foregroundStyle(batteryColor(model.battery))
+                    Text(model.battery.map { "\($0)%" } ?? "—")
+                        .font(.title3).fontWeight(.medium).monospacedDigit()
+                }
+                .help("Battery level (Battery Service 0x2A19)")
+
+                Divider().frame(height: 30)
+
+                label("Link", model.rssi.map { "\($0) dBm" } ?? "—")
+                if let info = model.deviceInfo {
+                    label("Device", [info.manufacturerName, info.modelNumber]
+                        .compactMap { $0 }.joined(separator: " "))
+                    if let fw = info.firmwareRevision { label("Firmware", fw) }
+                }
+                if let features = model.features {
+                    label("PLX", features.shortDescription)
+                }
+            }
+            .padding(.vertical, 8).padding(.horizontal, 12)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    /// SF Symbol for a battery level (nil → empty outline).
+    private func batterySymbol(_ level: Int?) -> String {
+        switch level {
+        case .none: return "battery.0"
+        case .some(let l) where l < 13: return "battery.0"
+        case .some(let l) where l < 38: return "battery.25"
+        case .some(let l) where l < 63: return "battery.50"
+        case .some(let l) where l < 88: return "battery.75"
+        default: return "battery.100"
+        }
+    }
+
+    private func batteryColor(_ level: Int?) -> Color {
+        guard let level else { return .secondary }
+        if level < 20 { return .red }
+        if level < 40 { return .orange }
+        return .green
+    }
+
+    private func label(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            Text(value).font(.callout).monospacedDigit()
         }
     }
 
