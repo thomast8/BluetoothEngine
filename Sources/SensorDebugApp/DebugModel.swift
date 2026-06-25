@@ -114,6 +114,13 @@ final class DebugModel {
     }
 
     func startScan() {
+        // Don't start a scan while a connect is in flight — on the single-session radio a scan competes
+        // with the connect and can disrupt a fragile device mid-connection. (Re-scanning once connected
+        // is fine and is how an already-connected device stays in the list.)
+        if phase == .connecting {
+            logger.log("scan_ignored", ["reason": "connect in flight"])
+            return
+        }
         // Keep the currently-connected device in the list — a scan won't rediscover a connected
         // peripheral (it stops advertising), and dropping it would make switching back impossible.
         devices = devices.filter { $0.id == connectedDevice?.id }
