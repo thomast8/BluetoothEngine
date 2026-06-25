@@ -135,7 +135,7 @@ struct Decode: AsyncParsableCommand {
 
     @OptionGroup var selector: PeripheralSelector
 
-    @Option(name: .long, help: "Parser to use: auto | plxs | proprietary.")
+    @Option(name: .long, help: "Parser to use: auto | plxs | hrs | proprietary.")
     var service: String = "auto"
 
     func run() async throws {

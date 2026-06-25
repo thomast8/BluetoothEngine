@@ -10,7 +10,7 @@ final class PLXSParserTests: XCTestCase {
         let m = parser.parse(characteristic: KnownUUIDs.plxContinuousMeasurement, value: frame)
         XCTAssertEqual(m?.spo2, 98)
         XCTAssertEqual(m?.pulseRate, 60)
-        XCTAssertEqual(m?.fingerDetected, true)
+        XCTAssertEqual(m?.contactDetected, true)
         XCTAssertEqual(m?.quality, .good)
         XCTAssertEqual(m?.raw, frame)
     }
@@ -36,8 +36,8 @@ final class PLXSParserTests: XCTestCase {
         let frame = Data([0x08, 0xFF, 0x07, 0xFF, 0x07, 0x00, 0x08, 0x00])
         let m = parser.parse(characteristic: KnownUUIDs.plxContinuousMeasurement, value: frame)
         XCTAssertNil(m?.spo2, "0x07FF is the SFLOAT NaN sentinel")
-        XCTAssertEqual(m?.fingerDetected, false)
-        XCTAssertEqual(m?.quality, .noFinger)
+        XCTAssertEqual(m?.contactDetected, false)
+        XCTAssertEqual(m?.quality, .noContact)
     }
 
     func testDeviceStatusLowPerfusion() {
@@ -45,13 +45,13 @@ final class PLXSParserTests: XCTestCase {
         let frame = Data([0x08, 0x5F, 0x00, 0x46, 0x00, 0x20, 0x00, 0x00])
         let m = parser.parse(characteristic: KnownUUIDs.plxContinuousMeasurement, value: frame)
         XCTAssertEqual(m?.spo2, 95)
-        XCTAssertEqual(m?.fingerDetected, true)
+        XCTAssertEqual(m?.contactDetected, true)
         XCTAssertEqual(m?.quality, .lowPerfusion)
     }
 
     func testInterpretDeviceStatusDirectly() {
         XCTAssertEqual(PLXSParser.interpretDeviceStatus(0, spo2: 98).1, .good)
         XCTAssertEqual(PLXSParser.interpretDeviceStatus(1 << 11, spo2: 98).0, false)
-        XCTAssertEqual(PLXSParser.interpretDeviceStatus(1 << 7, spo2: 98).1, .noFinger)
+        XCTAssertEqual(PLXSParser.interpretDeviceStatus(1 << 7, spo2: 98).1, .noContact)
     }
 }

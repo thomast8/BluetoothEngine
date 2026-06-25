@@ -243,7 +243,7 @@ public final class BLECentral: NSObject {
     /// Register a listener for raw notifications. May be called any number of times — every listener
     /// receives every notification. Register before `subscribe` (or use `startNotifications`) so no
     /// early frames are missed. The stream ends on `finishActiveStreams()` / disconnect, or when the
-    /// consumer drops it. To decode measurements, feed the stream to `pulseOxMeasurements(from:parser:)`.
+    /// consumer drops it. To decode measurements, feed the stream to `vitalsMeasurements(from:parser:)`.
     public func notifications() -> AsyncStream<RawNotification> {
         let id = nextListenerID
         nextListenerID += 1

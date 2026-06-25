@@ -18,8 +18,8 @@ final class MeasurementStreamTests: XCTestCase {
         ))
         continuation.finish()
 
-        var results: [PulseOxMeasurement] = []
-        for await measurement in pulseOxMeasurements(from: raw, parser: PLXSParser()) {
+        var results: [VitalsMeasurement] = []
+        for await measurement in vitalsMeasurements(from: raw, parser: PLXSParser()) {
             results.append(measurement)
         }
 

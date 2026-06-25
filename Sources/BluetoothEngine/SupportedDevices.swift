@@ -9,7 +9,7 @@ public enum SupportedDevices {
     /// Parsers the engine ships with. The proprietary stub is intentionally excluded — it isn't a
     /// real capability until its protocol is implemented.
     public static var parsers: [MeasurementParser] {
-        [PLXSParser()]
+        [PLXSParser(), HeartRateParser()]
     }
 
     /// GATT service UUIDs the engine can decode. Pass to `BLECentral.scan(filterServices:)` to have
@@ -25,7 +25,8 @@ public enum SupportedDevices {
     }
 
     /// The parser to use for a peripheral given its discovered/advertised service UUIDs, or nil if
-    /// none match.
+    /// none match. When more than one parser matches (a device advertising multiple supported
+    /// services), the first match in `parsers` wins.
     public static func parser(forServiceUUIDs uuids: [String]) -> MeasurementParser? {
         let wanted = Set(uuids.map { $0.uppercased() })
         return parsers.first { wanted.contains($0.serviceUUID.uuidString.uppercased()) }

@@ -100,6 +100,7 @@ enum SensorRunner {
         let parser: MeasurementParser?
         switch service.lowercased() {
         case "plxs": parser = PLXSParser()
+        case "hrs": parser = HeartRateParser()
         case "proprietary": parser = ProprietaryPM100Parser()
         default: parser = SupportedDevices.parser(forServiceUUIDs: services.map(\.uuid))
         }
@@ -119,14 +120,17 @@ enum SensorRunner {
         defer { source.cancel() }
 
         let targets = parser.characteristicUUIDs.map { $0.uuidString }
-        let stream = pulseOxMeasurements(from: central.notifications(), parser: parser)
+        let stream = vitalsMeasurements(from: central.notifications(), parser: parser)
         try await central.subscribe(characteristics: targets.isEmpty ? nil : targets)
         print("decoding with \(type(of: parser)) — Ctrl-C to stop")
 
         for await m in stream {
             let spo2 = m.spo2.map { String(format: "%.0f%%", $0) } ?? "--"
             let pr = m.pulseRate.map { String(format: "%.0f bpm", $0) } ?? "--"
-            print("SpO2 \(spo2)  PR \(pr)  finger=\(m.fingerDetected)  q=\(m.quality.rawValue)")
+            let rr = m.rrIntervalsMillis.map { intervals in
+                "  RR [" + intervals.map { String(format: "%.0f", $0) }.joined(separator: ", ") + "] ms"
+            } ?? ""
+            print("SpO2 \(spo2)  PR \(pr)\(rr)  contact=\(m.contactDetected)  q=\(m.quality.rawValue)")
         }
         central.disconnect()
     }
