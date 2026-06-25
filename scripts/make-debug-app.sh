@@ -2,7 +2,7 @@
 # Bundle the SensorDebugApp executable into a proper macOS .app so it gets its own bundle identity
 # (and therefore a stable Bluetooth/TCC permission grant, instead of inheriting the terminal's).
 #
-# Usage:  scripts/make-debug-app.sh   ->   builds .build/SensorDebug.app and prints how to run it.
+# Usage:  scripts/make-debug-app.sh   ->   builds ./SensorDebug.app and prints how to run it.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -10,7 +10,9 @@ cd "$(dirname "$0")/.."
 APP_NAME="SensorDebug"
 EXEC_NAME="sensor-debug"
 PLIST="Sources/SensorDebugApp/Resources/Info.plist"
-APP_DIR=".build/${APP_NAME}.app"
+# Drop the bundle at the repo root (not inside the hidden .build/) so it's visible
+# and double-clickable in Finder.
+APP_DIR="${APP_NAME}.app"
 
 echo "==> swift build -c release --product ${EXEC_NAME}"
 swift build -c release --product "${EXEC_NAME}"

@@ -37,8 +37,8 @@ A **bare `swift run` binary TCC-crashes** (SIGABRT) the instant it touches CoreB
 honor the embedded Bluetooth usage string unless the binary is **code-signed**. Use the bundled app:
 
 ```sh
-bash scripts/make-debug-app.sh     # builds + ad-hoc-signs .build/SensorDebug.app
-open .build/SensorDebug.app         # grant the one-time Bluetooth prompt, then Scan/connect
+bash scripts/make-debug-app.sh     # builds + ad-hoc-signs ./SensorDebug.app (at the repo root)
+open SensorDebug.app               # grant the one-time Bluetooth prompt, then Scan/connect
 ```
 
 The Bluetooth permission grant attaches to the launching app/terminal, not to the binary name. To run

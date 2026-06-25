@@ -64,7 +64,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test   # 48 pure-
 instant it touches CoreBluetooth — macOS won't honor the Bluetooth usage string for an unsigned binary.
 
 ```sh
-bash scripts/make-debug-app.sh && open .build/SensorDebug.app     # ad-hoc-signed GUI; grant BT once
+bash scripts/make-debug-app.sh && open SensorDebug.app            # ad-hoc-signed GUI at repo root; grant BT once
 codesign --sign - "$(swift build --show-bin-path)/sensor"          # then: sensor info|explore|decode --name PM100
 ```
 
