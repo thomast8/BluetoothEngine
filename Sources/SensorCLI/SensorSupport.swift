@@ -40,6 +40,10 @@ func asciiString(_ data: Data) -> String {
     return "\"" + String(chars) + "\""
 }
 
+enum CaptureLimits {
+    static let defaultMaxBytes = 100 * 1024 * 1024
+}
+
 /// Install a SIGINT handler that runs `onInterrupt` on the main queue instead of terminating, so a
 /// capture loop can finish its stream and flush. Keep the returned source alive for the loop's life.
 @MainActor
@@ -54,20 +58,35 @@ func installInterruptHandler(_ onInterrupt: @escaping @Sendable () -> Void) -> D
 /// Appends capture lines to a file, flushing + fsyncing on close so a Ctrl-C'd capture is valid.
 final class CaptureWriter {
     private let handle: FileHandle
+    private let maxBytes: Int
+    private var bytesWritten = 0
+    private var limitReported = false
     let path: String
 
-    init(path: String, header: String?) throws {
+    init(path: String, header: String?, maxBytes: Int = CaptureLimits.defaultMaxBytes) throws {
         self.path = path
+        self.maxBytes = maxBytes
         FileManager.default.createFile(atPath: path, contents: nil)
         guard let handle = FileHandle(forWritingAtPath: path) else {
             throw BLEError.connectionFailed(reason: "cannot open \(path) for writing")
         }
         self.handle = handle
-        if let header { handle.write(Data((header + "\n").utf8)) }
+        if let header { write(header) }
     }
 
     func write(_ line: String) {
-        handle.write(Data((line + "\n").utf8))
+        let data = Data((line + "\n").utf8)
+        guard bytesWritten + data.count <= maxBytes else {
+            if !limitReported {
+                limitReported = true
+                FileHandle.standardError.write(Data(
+                    "warning: capture \(path) reached \(maxBytes) bytes; dropping later frames\n".utf8
+                ))
+            }
+            return
+        }
+        handle.write(data)
+        bytesWritten += data.count
     }
 
     func close() {

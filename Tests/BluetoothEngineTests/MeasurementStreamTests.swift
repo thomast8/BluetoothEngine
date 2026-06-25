@@ -27,4 +27,26 @@ final class MeasurementStreamTests: XCTestCase {
         XCTAssertEqual(results.first?.spo2, 98)
         XCTAssertEqual(results.first?.pulseRate, 60)
     }
+
+    func testMeasurementStreamUsesBoundedNewestBuffer() async {
+        let (raw, continuation) = AsyncStream<RawNotification>.makeStream()
+        let stream = vitalsMeasurements(from: raw, parser: PLXSParser())
+
+        for i in 0..<(BLEStreamLimits.decodedMeasurements + 20) {
+            let spo2 = UInt8(80 + (i % 20))
+            continuation.yield(RawNotification(
+                characteristicUUID: KnownUUIDs.plxContinuousMeasurement.uuidString,
+                data: Data([0x00, spo2, 0x00, 0x3C, 0x00]),
+                monotonicSeconds: Double(i), wallClock: Date()
+            ))
+        }
+        continuation.finish()
+
+        try? await Task.sleep(for: .milliseconds(100))
+        var results: [VitalsMeasurement] = []
+        for await measurement in stream { results.append(measurement) }
+
+        XCTAssertLessThanOrEqual(results.count, BLEStreamLimits.decodedMeasurements)
+        XCTAssertEqual(results.last?.spo2, 95)
+    }
 }

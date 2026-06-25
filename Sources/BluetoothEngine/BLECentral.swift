@@ -478,7 +478,9 @@ public final class BLECentral: NSObject {
     public func notifications() -> AsyncStream<RawNotification> {
         let id = nextListenerID
         nextListenerID += 1
-        let (stream, continuation) = AsyncStream<RawNotification>.makeStream()
+        let (stream, continuation) = AsyncStream<RawNotification>.makeStream(
+            bufferingPolicy: .bufferingNewest(BLEStreamLimits.rawNotifications)
+        )
         notificationListeners[id] = continuation
         continuation.onTermination = { [weak self] _ in
             Task { @MainActor in self?.notificationListeners[id] = nil }
@@ -755,6 +757,12 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate {
             monotonicSeconds: monotonicSeconds(),
             wallClock: Date()
         )
-        for listener in notificationListeners.values { listener.yield(note) }
+        var terminatedListenerIDs: [Int] = []
+        for (id, listener) in notificationListeners {
+            if case .terminated = listener.yield(note) {
+                terminatedListenerIDs.append(id)
+            }
+        }
+        for id in terminatedListenerIDs { notificationListeners[id] = nil }
     }
 }

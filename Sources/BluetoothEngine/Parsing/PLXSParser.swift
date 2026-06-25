@@ -63,16 +63,45 @@ public struct PLXSParser: MeasurementParser {
         )
     }
 
-    // 0x2A5E: flags(1) | SpO2 SFLOAT(2) | PR SFLOAT(2) | [timestamp | status | ...].
+    // 0x2A5E: flags(1) | SpO2 SFLOAT(2) | PR SFLOAT(2) |
+    // [timestamp | measurement status | device/sensor status | PAI].
     private func parseSpotCheck(_ data: Data) -> VitalsMeasurement? {
         guard data.count >= 5 else { return nil }
-        let spo2 = Self.noReadingToNil(SFLOAT.decode(data, at: 1))
-        let pr = Self.noReadingToNil(SFLOAT.decode(data, at: 3))
+        let flags = data[data.startIndex]
+        var spo2 = Self.noReadingToNil(SFLOAT.decode(data, at: 1))
+        var pr = Self.noReadingToNil(SFLOAT.decode(data, at: 3))
+
+        var offset = 5
+        if flags & 0x01 != 0 {
+            guard offset + 7 <= data.count else { return nil } // Timestamp
+            offset += 7
+        }
+        if flags & 0x02 != 0 {
+            guard offset + 2 <= data.count else { return nil } // Measurement Status
+            offset += 2
+        }
+
+        var finger = spo2 != nil
+        var quality: SignalQuality = spo2 == nil ? .searching : .good
+        if flags & 0x04 != 0 {
+            guard offset + 3 <= data.count else { return nil }
+            let s0 = UInt32(data[data.startIndex + offset])
+            let s1 = UInt32(data[data.startIndex + offset + 1])
+            let s2 = UInt32(data[data.startIndex + offset + 2])
+            let status = s0 | (s1 << 8) | (s2 << 16)
+            (finger, quality) = Self.interpretDeviceStatus(status, spo2: spo2)
+        }
+
+        if !finger {
+            spo2 = nil
+            pr = nil
+        }
+
         return VitalsMeasurement(
             spo2: spo2,
             pulseRate: pr,
-            contactDetected: spo2 != nil,
-            quality: spo2 == nil ? .searching : .good,
+            contactDetected: finger,
+            quality: quality,
             raw: data
         )
     }

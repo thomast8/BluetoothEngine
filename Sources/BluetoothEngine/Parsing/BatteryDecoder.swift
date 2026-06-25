@@ -21,7 +21,7 @@ public enum BatteryDecoder {
 public func batteryLevels(
     from notifications: AsyncStream<RawNotification>
 ) -> AsyncStream<Int> {
-    AsyncStream { continuation in
+    AsyncStream(bufferingPolicy: .bufferingNewest(BLEStreamLimits.batteryLevels)) { continuation in
         let task = Task {
             for await note in notifications {
                 guard CBUUID(string: note.characteristicUUID) == KnownUUIDs.batteryLevel else { continue }

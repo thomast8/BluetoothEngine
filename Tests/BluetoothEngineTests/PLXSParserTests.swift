@@ -22,6 +22,46 @@ final class PLXSParserTests: XCTestCase {
         XCTAssertEqual(m?.pulseRate, 73)
     }
 
+    func testSpotCheckDeviceStatusSensorUnconnectedSuppressesReading() {
+        // flags=0x04 (Device & Sensor Status present) | SpO2=98 | PR=60 | status bit 11.
+        let frame = Data([0x04, 0x62, 0x00, 0x3C, 0x00, 0x00, 0x08, 0x00])
+        let m = parser.parse(characteristic: KnownUUIDs.plxSpotCheckMeasurement, value: frame)
+        XCTAssertNil(m?.spo2)
+        XCTAssertNil(m?.pulseRate)
+        XCTAssertEqual(m?.contactDetected, false)
+        XCTAssertEqual(m?.quality, .noContact)
+    }
+
+    func testSpotCheckDeviceStatusLowPerfusion() {
+        // flags=0x04 | SpO2=95 | PR=70 | status bit 5.
+        let frame = Data([0x04, 0x5F, 0x00, 0x46, 0x00, 0x20, 0x00, 0x00])
+        let m = parser.parse(characteristic: KnownUUIDs.plxSpotCheckMeasurement, value: frame)
+        XCTAssertEqual(m?.spo2, 95)
+        XCTAssertEqual(m?.pulseRate, 70)
+        XCTAssertEqual(m?.contactDetected, true)
+        XCTAssertEqual(m?.quality, .lowPerfusion)
+    }
+
+    func testSpotCheckSkipsTimestampAndMeasurementStatusBeforeDeviceStatus() {
+        // flags=0x07 | SpO2=98 | PR=60 | timestamp(7) | measurement status(2) | status bit 11.
+        let frame = Data([
+            0x07, 0x62, 0x00, 0x3C, 0x00,
+            0xE9, 0x07, 0x06, 0x19, 0x10, 0x22, 0x05,
+            0x00, 0x00,
+            0x00, 0x08, 0x00
+        ])
+        let m = parser.parse(characteristic: KnownUUIDs.plxSpotCheckMeasurement, value: frame)
+        XCTAssertNil(m?.spo2)
+        XCTAssertNil(m?.pulseRate)
+        XCTAssertEqual(m?.contactDetected, false)
+        XCTAssertEqual(m?.quality, .noContact)
+    }
+
+    func testSpotCheckTruncatedDeviceStatusReturnsNil() {
+        let frame = Data([0x04, 0x62, 0x00, 0x3C, 0x00, 0x00, 0x08])
+        XCTAssertNil(parser.parse(characteristic: KnownUUIDs.plxSpotCheckMeasurement, value: frame))
+    }
+
     func testTooShortReturnsNil() {
         XCTAssertNil(parser.parse(characteristic: KnownUUIDs.plxContinuousMeasurement, value: Data([0x00, 0x62])))
     }

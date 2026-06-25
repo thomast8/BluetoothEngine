@@ -33,4 +33,24 @@ final class BatteryDecoderTests: XCTestCase {
 
         XCTAssertEqual(levels, [75], "only the 0x2A19 frame should decode; the measurement frame is dropped")
     }
+
+    func testBatteryLevelsStreamUsesBoundedNewestBuffer() async {
+        let (raw, continuation) = AsyncStream<RawNotification>.makeStream()
+        let stream = batteryLevels(from: raw)
+
+        for i in 0..<(BLEStreamLimits.batteryLevels + 12) {
+            continuation.yield(RawNotification(
+                characteristicUUID: KnownUUIDs.batteryLevel.uuidString,
+                data: Data([UInt8(i % 101)]), monotonicSeconds: Double(i), wallClock: Date()
+            ))
+        }
+        continuation.finish()
+
+        try? await Task.sleep(for: .milliseconds(100))
+        var levels: [Int] = []
+        for await level in stream { levels.append(level) }
+
+        XCTAssertLessThanOrEqual(levels.count, BLEStreamLimits.batteryLevels)
+        XCTAssertEqual(levels.last, 75)
+    }
 }
