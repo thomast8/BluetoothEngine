@@ -79,6 +79,11 @@ final class DebugModel {
     var dataStale: Bool = false
     private var lastMeasurementAt: Date?
     private var connectedSince: Date?
+    private var connectStartedAt: Date?
+    /// Ignore a switch to a different device within this window of starting a connect, to absorb a rapid
+    /// click-storm. Rapid connect→cancel→connect churn wedges fragile devices (cheap oximeters); after
+    /// the window a switch still supersedes, so a slow/hung connect can be abandoned.
+    private let connectDebounce: TimeInterval = 1.0
 
     private let logLimit = 500
 
@@ -172,6 +177,15 @@ final class DebugModel {
         // Already connected to this device — clicking it shouldn't tear down and reconnect (it's live,
         // shown with the connected badge). Switching to a *different* device falls through.
         if phase == .connected, connectedDevice?.id == device.id { return }
+        // Debounce a click-storm: while a connect to a different device is still settling (started within
+        // `connectDebounce`), ignore the switch so we don't churn connect→cancel→connect on a fragile
+        // device. After the window the switch supersedes normally (a hung connect can still be abandoned).
+        if phase == .connecting, let startedAt = connectStartedAt, connectedDevice?.id != device.id,
+           Date().timeIntervalSince(startedAt) < connectDebounce {
+            logger.log("connect_debounced", ["id": device.id.uuidString, "name": device.name ?? NSNull()])
+            return
+        }
+        connectStartedAt = Date()
         // Tear down any current session first — the central is single-session, so switching devices
         // must not leave the previous device's connect/inventory or notification streams running
         // (the engine drops the previous peripheral itself). Cancel old tasks and clear stale readout.
