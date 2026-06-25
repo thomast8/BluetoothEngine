@@ -14,7 +14,7 @@ struct SensorCommand: AsyncParsableCommand {
         `raw --csv` (capture frames) → `decode` (parse live). The Bluetooth permission prompt is \
         attributed to the terminal app running `sensor`, not to `sensor` itself.
         """,
-        subcommands: [Doctor.self, Scan.self, Explore.self, Raw.self, Decode.self],
+        subcommands: [Doctor.self, Scan.self, Explore.self, Raw.self, Decode.self, Info.self],
         defaultSubcommand: Scan.self
     )
 }
@@ -141,6 +141,23 @@ struct Decode: AsyncParsableCommand {
     func run() async throws {
         do {
             try await SensorRunner.decode(match: try selector.match(), timeout: selector.timeout, service: service)
+        } catch {
+            throw failing(error)
+        }
+    }
+}
+
+struct Info: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "info",
+        abstract: "Connect and print read-once telemetry: device info, PLX features, battery, RSSI."
+    )
+
+    @OptionGroup var selector: PeripheralSelector
+
+    func run() async throws {
+        do {
+            try await SensorRunner.info(match: try selector.match(), timeout: selector.timeout)
         } catch {
             throw failing(error)
         }
