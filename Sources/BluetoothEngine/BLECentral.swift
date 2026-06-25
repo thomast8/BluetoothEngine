@@ -27,6 +27,11 @@ public final class BLECentral: NSObject {
     private var pendingMatch: ((CBPeripheral, [String: Any]) -> Bool)?
     private var peripheral: CBPeripheral?
     private var connectGeneration = 0
+    private var connectStartedAt: Date?
+    /// Minimum spacing between connect attempts. Rapid switching is rate-limited to this so a burst of
+    /// connect→cancel→connect can't thrash the radio and wedge a fragile device. A new connect still
+    /// proceeds after the window — nothing is silently dropped.
+    private let connectSettle: TimeInterval = 1.0
 
     // Discovery steps (continuation per in-flight request).
     private var discoverServicesWaiter: CheckedContinuation<Void, Error>?
@@ -130,7 +135,18 @@ public final class BLECentral: NSObject {
     /// stop or nil a newer scan — important when a caller reopens scans back-to-back (e.g. the probing
     /// discovery loop): the old `onTermination` may not run until after the new `scan()` has already
     /// installed its continuation.
+    ///
+    /// Single-session radio arbitration: while a `connect()` is in flight, a scan would share the radio
+    /// with the connection attempt and can disrupt a fragile device mid-connection. In that case this
+    /// returns an immediately-finished stream rather than starting a competing scan — the radio is
+    /// reserved for the connect. (Scanning once *connected* is fine; a fresh `connect()` drops any active
+    /// scan itself.) This keeps the safety in the engine so every consumer gets it, not each app.
     public func scan(filterServices: [CBUUID]? = nil) -> AsyncStream<DiscoveredPeripheral> {
+        guard connectContinuation == nil else {
+            let (stream, continuation) = AsyncStream<DiscoveredPeripheral>.makeStream()
+            continuation.finish()
+            return stream
+        }
         scanGeneration += 1
         let generation = scanGeneration
         let (stream, continuation) = AsyncStream<DiscoveredPeripheral>.makeStream()
@@ -162,6 +178,17 @@ public final class BLECentral: NSObject {
     /// single-session slot is free and a switch isn't blocked by the old link.
     public func connect(matching match: PeripheralMatch, timeout: TimeInterval) async throws {
         try await waitUntilReady()
+
+        // Anti-churn rate-limit: don't violently interrupt a connect that just started — let the in-flight
+        // one settle briefly first, so rapid switching can't thrash the radio and wedge a fragile device.
+        // This spaces switches out; the request still proceeds once the window passes (or the in-flight
+        // connect resolves), so nothing is silently dropped. The engine owns this so every consumer gets
+        // it without app-side debouncing.
+        while connectContinuation != nil, let started = connectStartedAt,
+              Date().timeIntervalSince(started) < connectSettle {
+            try? await Task.sleep(for: .milliseconds(40))
+        }
+        connectStartedAt = Date()
 
         connectGeneration += 1
         let generation = connectGeneration

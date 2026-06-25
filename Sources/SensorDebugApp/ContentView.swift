@@ -268,7 +268,6 @@ struct ContentView: View {
                 Button("Stop", systemImage: "stop.fill", action: model.stopScan)
             } else {
                 Button("Scan", systemImage: "dot.radiowaves.left.and.right", action: model.startScan)
-                    .disabled(model.phase == .connecting) // don't scan over an in-flight connect
             }
             Button("Disconnect", systemImage: "xmark.circle", action: model.disconnect)
                 .disabled(model.phase != .connected && model.phase != .connecting)
