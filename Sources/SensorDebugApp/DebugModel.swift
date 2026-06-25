@@ -177,12 +177,9 @@ final class DebugModel {
         // (the engine drops the previous peripheral itself). Cancel old tasks and clear stale readout.
         connectTask?.cancel()
         connectionTask?.cancel()
-        rawTask?.cancel()
-        measureTask?.cancel()
-        batteryTask?.cancel()
         rssiTask?.cancel()
-        subscribeTask?.cancel()
         scanTask?.cancel()
+        cancelStreamTasks()
         central.finishActiveStreams()
         phase = .connecting
         connectedDevice = device
@@ -222,14 +219,21 @@ final class DebugModel {
         }
     }
 
-    func disconnect() {
-        connectTask?.cancel()
-        connectionTask?.cancel()
+    /// Cancel the notification-stream consumer tasks (raw hex, measurements, battery, subscribe). Shared
+    /// by every teardown path (connect/disconnect/unexpected-drop) so a new stream task can't be forgotten
+    /// in one of them.
+    private func cancelStreamTasks() {
         rawTask?.cancel()
         measureTask?.cancel()
         batteryTask?.cancel()
-        rssiTask?.cancel()
         subscribeTask?.cancel()
+    }
+
+    func disconnect() {
+        connectTask?.cancel()
+        connectionTask?.cancel()
+        rssiTask?.cancel()
+        cancelStreamTasks()
         central.finishActiveStreams()
         central.disconnect()
         phase = .idle
@@ -255,10 +259,7 @@ final class DebugModel {
     /// "connected"/pinning a device that's gone, and drop it from the list (a re-scan re-adds it if it
     /// returns). Stays out of `disconnect()` so a user disconnect doesn't double-run this.
     private func handleUnexpectedDisconnect() {
-        rawTask?.cancel()
-        measureTask?.cancel()
-        batteryTask?.cancel()
-        subscribeTask?.cancel()
+        cancelStreamTasks()
         if let goneID = connectedDevice?.id {
             supportedDevices.removeAll { $0.peripheral.id == goneID }
             devices.removeAll { $0.id == goneID }

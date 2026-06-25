@@ -8,7 +8,7 @@ the layering every session.
 ## Targets (`Package.swift`)
 
 - **`BluetoothEngine`** — the library. Everything below lives here unless noted.
-- **`sensor`** (`Sources/SensorCLI`) — CLI: `doctor` / `scan` / `explore` / `raw` / `decode` / `info`.
+- **`sensor`** (`Sources/SensorCLI`) — CLI: `doctor` / `scan` / `discover` / `explore` / `raw` / `decode` / `info`.
 - **`sensor-debug`** (`Sources/SensorDebugApp`) — SwiftUI debug GUI; streams every event over loopback
   SSE + JSONL (`SessionLogger`) so a session is observable without the GUI.
 - **`BluetoothEngineTests`** (`Tests/`) — pure-function parser/stream/decoder tests (no CoreBluetooth).
@@ -58,7 +58,7 @@ notifying characteristic (battery included); the CLI passes explicit targets and
 
 ```sh
 swift build
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test   # 48 pure-function tests
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test   # 80 pure-function tests
 ```
 
 **Running against real hardware needs code signing.** A bare `swift run` **TCC-crashes (SIGABRT)** the

@@ -9,6 +9,11 @@ import XCTest
 ///
 /// `@MainActor` because the fake transport (like `BLECentral`) is main-actor-isolated, and the asserts
 /// read its call-tracking state.
+///
+/// NOTE: this fake models the discovery *policy* only. `BLECentral`'s connection-management hardening
+/// (scan/connect generation guards, reconnect-by-identifier, the `peripheral === peripheral` delegate
+/// guards, supersede/switch races) depends on live CoreBluetooth and is NOT unit-covered here — it is
+/// verified on real hardware (PM100 + Whoop). Don't assume these tests exercise that layer.
 @MainActor
 final class DeviceProbingTests: XCTestCase {
     // MARK: Fake transport
@@ -23,6 +28,8 @@ final class DeviceProbingTests: XCTestCase {
         private(set) var connectCalls: [UUID] = []
         private(set) var inventoryCalls = 0
         private(set) var disconnectCalls = 0
+        /// Ordered log of "scan"/"connect" actions, to assert one-per-cycle (a scan between probes).
+        private(set) var actions: [String] = []
 
         private var scanContinuation: AsyncStream<DiscoveredPeripheral>.Continuation?
         private var connectedID: UUID?
@@ -42,6 +49,7 @@ final class DeviceProbingTests: XCTestCase {
         func waitUntilReady() async throws {}
 
         func scan(filterServices: [CBUUID]?) -> AsyncStream<DiscoveredPeripheral> {
+            actions.append("scan")
             let (stream, cont) = AsyncStream<DiscoveredPeripheral>.makeStream()
             scanContinuation = cont
             for ad in advertisements { cont.yield(ad) }
@@ -61,6 +69,7 @@ final class DeviceProbingTests: XCTestCase {
             guard case .id(let id) = match else {
                 throw BLEError.deviceNotFound(query: match.description)
             }
+            actions.append("connect")
             connectCalls.append(id)
             if connectFailIDs.contains(id) {
                 throw BLEError.deviceNotFound(query: id.uuidString)
@@ -169,10 +178,25 @@ final class DeviceProbingTests: XCTestCase {
         // mode, and without probing.
         let dev = device(advertised: [KnownUUIDs.pulseOximeterService.uuidString], connectable: true)
         let fake = FakeProbe(advertisements: [], connected: [dev])
-        let events = await runDiscovery(fake, probe: false, maxEvents: 1)
+        let events = await runDiscovery(fake, probe: false)
+        XCTAssertEqual(events.count, 1, "surfaced once, not repeatedly")
         XCTAssertEqual(events.first?.confirmation, .connected)
         XCTAssertEqual(events.first?.decoderName, "PLXSParser")
         XCTAssertTrue(fake.connectCalls.isEmpty, "an already-connected device is surfaced without probing")
+    }
+
+    func testProbesAtMostOnePerScanCycle() async {
+        // Two connectable unknowns. One-per-cycle means a scan window precedes every probe, so the two
+        // probes are never back-to-back; draining the whole queue in one cycle would emit adjacent
+        // "connect" actions with no "scan" between them.
+        let a = device(advertised: [], connectable: true)
+        let b = device(advertised: [], connectable: true)
+        let fake = FakeProbe(advertisements: [a, b], gattByID: [a.id: plxsGATT(), b.id: plxsGATT()])
+        _ = await runDiscovery(fake, deadline: .milliseconds(300))
+        XCTAssertEqual(fake.connectCalls.count, 2, "both probed exactly once")
+        let backToBackProbes = zip(fake.actions, fake.actions.dropFirst())
+            .contains { $0 == "connect" && $1 == "connect" }
+        XCTAssertFalse(backToBackProbes, "probes must be separated by a scan window (one per cycle)")
     }
 
     func testProbeDisabledNeverConnects() async {

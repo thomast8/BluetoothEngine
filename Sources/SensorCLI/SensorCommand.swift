@@ -79,7 +79,7 @@ struct Scan: AsyncParsableCommand {
 struct Discover: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "discover",
-        abstract: "List devices the engine can decode (those advertising a supported service)."
+        abstract: "List devices the engine can decode: advertised + already-connected by default, --probe to also connect to unknowns."
     )
 
     @Flag(name: .long, help: "Also connect to unknown peripherals to confirm support. Intrusive: reaches out to nearby devices and can trigger pairing prompts.")

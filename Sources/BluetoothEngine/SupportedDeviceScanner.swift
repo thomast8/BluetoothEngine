@@ -21,7 +21,7 @@ public struct SupportedDevice: Sendable, Equatable {
         public var label: String {
             switch self {
             case .advertised: return "advertised"
-            case .probed: return "probe"
+            case .probed: return "probed"
             case .connected: return "connected"
             }
         }

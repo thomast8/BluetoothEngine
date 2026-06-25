@@ -166,10 +166,15 @@ public final class BLECentral: NSObject {
         connectGeneration += 1
         let generation = connectGeneration
 
-        // Supersede an in-flight connect from a previous call (e.g. switching devices quickly) so its
-        // continuation can't linger; its timeout is already neutralised by the generation bump.
+        // Supersede an in-flight connect from a previous call (e.g. switching devices quickly): fail its
+        // continuation, and crucially discard its scan-path matcher + stop its scan. Otherwise a prior
+        // fallback (scan-path) connect's `pendingMatch` stays armed and a stale `didDiscover` could
+        // clobber `peripheral` and resolve this connect against the wrong device. (Its timeout is already
+        // neutralised by the generation bump, so it would never clear `pendingMatch` itself.)
         if let stale = connectContinuation {
             connectContinuation = nil
+            pendingMatch = nil
+            if manager.state == .poweredOn { manager.stopScan() }
             stale.resume(throwing: BLEError.connectionFailed(reason: "superseded by a new connection"))
         }
 
