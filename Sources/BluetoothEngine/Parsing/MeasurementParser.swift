@@ -1,7 +1,7 @@
 import CoreBluetooth
 import Foundation
 
-/// Decodes raw GATT characteristic payloads into `PulseOxMeasurement`s.
+/// Decodes raw GATT characteristic payloads into `VitalsMeasurement`s.
 ///
 /// Implementations are pure (`Data` in, value out) so they can be unit-tested against captured
 /// frames with no CoreBluetooth or hardware. `parse` returns `nil` when a payload carries no usable
@@ -11,5 +11,5 @@ public protocol MeasurementParser: Sendable {
     var serviceUUID: CBUUID { get }
     /// Characteristics this parser knows how to decode (subscribe targets).
     var characteristicUUIDs: [CBUUID] { get }
-    func parse(characteristic: CBUUID, value: Data) -> PulseOxMeasurement?
+    func parse(characteristic: CBUUID, value: Data) -> VitalsMeasurement?
 }

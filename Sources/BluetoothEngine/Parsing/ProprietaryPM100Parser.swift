@@ -15,7 +15,7 @@ public struct ProprietaryPM100Parser: MeasurementParser {
     public var serviceUUID: CBUUID { CBUUID(string: "0000") }
     public var characteristicUUIDs: [CBUUID] { [] }
 
-    public func parse(characteristic: CBUUID, value: Data) -> PulseOxMeasurement? {
+    public func parse(characteristic: CBUUID, value: Data) -> VitalsMeasurement? {
         // TODO(reverse-engineer): decode the captured frame layout here.
         //
         // Common cheap-oximeter shape to look for in `capture.csv`:
@@ -23,7 +23,7 @@ public struct ProprietaryPM100Parser: MeasurementParser {
         //   - short ~5-byte frames at high rate carrying [sync][pleth][signal][spo2][pr];
         //   - SpO2 0x7F (127) and PR 0xFF (255) as the "no reading / finger out" sentinels.
         //
-        // Return PulseOxMeasurement(spo2:pulseRate:fingerDetected:quality:raw:) once decoded.
+        // Return VitalsMeasurement(spo2:pulseRate:contactDetected:quality:raw:) once decoded.
         nil
     }
 }

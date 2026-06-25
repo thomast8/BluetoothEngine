@@ -28,17 +28,30 @@ final class SupportedDevicesTests: XCTestCase {
         XCTAssertFalse(SupportedDevices.supports(peripheral(services: [])))
     }
 
+    func testSupportsMatchesHeartRateService() {
+        // A Whoop in Broadcast Heart Rate mode advertises 0x180D.
+        let hrs = KnownUUIDs.heartRateService.uuidString
+        XCTAssertTrue(SupportedDevices.supports(peripheral(services: [hrs])))
+    }
+
     func testParserForServiceUUIDsReturnsPLXS() {
         let parser = SupportedDevices.parser(forServiceUUIDs: [KnownUUIDs.pulseOximeterService.uuidString])
         XCTAssertEqual(parser?.serviceUUID, KnownUUIDs.pulseOximeterService)
+    }
+
+    func testParserForServiceUUIDsReturnsHeartRate() {
+        let parser = SupportedDevices.parser(forServiceUUIDs: [KnownUUIDs.heartRateService.uuidString])
+        XCTAssertTrue(parser is HeartRateParser)
+        XCTAssertEqual(parser?.serviceUUID, KnownUUIDs.heartRateService)
     }
 
     func testParserForUnsupportedServiceReturnsNil() {
         XCTAssertNil(SupportedDevices.parser(forServiceUUIDs: [KnownUUIDs.batteryService.uuidString]))
     }
 
-    func testServiceUUIDsIncludesPulseOximeter() {
+    func testServiceUUIDsIncludesPulseOximeterAndHeartRate() {
         XCTAssertTrue(SupportedDevices.serviceUUIDs.contains(KnownUUIDs.pulseOximeterService))
+        XCTAssertTrue(SupportedDevices.serviceUUIDs.contains(KnownUUIDs.heartRateService))
     }
 }
 
@@ -46,6 +59,9 @@ final class KnownUUIDsTests: XCTestCase {
     func testNameForKnownUUIDs() {
         XCTAssertEqual(KnownUUIDs.name(for: KnownUUIDs.pulseOximeterService), "Pulse Oximeter Service")
         XCTAssertEqual(KnownUUIDs.name(for: KnownUUIDs.plxContinuousMeasurement), "PLX Continuous Measurement")
+        XCTAssertEqual(KnownUUIDs.name(for: KnownUUIDs.heartRateService), "Heart Rate Service")
+        XCTAssertEqual(KnownUUIDs.name(for: KnownUUIDs.heartRateMeasurement), "Heart Rate Measurement")
+        XCTAssertEqual(KnownUUIDs.name(for: KnownUUIDs.bodySensorLocation), "Body Sensor Location")
         XCTAssertEqual(KnownUUIDs.name(for: KnownUUIDs.batteryLevel), "Battery Level")
     }
 

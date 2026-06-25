@@ -15,7 +15,7 @@ public struct PLXSParser: MeasurementParser {
         [KnownUUIDs.plxContinuousMeasurement, KnownUUIDs.plxSpotCheckMeasurement]
     }
 
-    public func parse(characteristic: CBUUID, value: Data) -> PulseOxMeasurement? {
+    public func parse(characteristic: CBUUID, value: Data) -> VitalsMeasurement? {
         switch characteristic {
         case KnownUUIDs.plxContinuousMeasurement:
             return parseContinuous(value)
@@ -27,7 +27,7 @@ public struct PLXSParser: MeasurementParser {
     }
 
     // 0x2A5F: flags(1) | SpO2 SFLOAT(2) | PR SFLOAT(2) | [optional fast/slow/status fields].
-    private func parseContinuous(_ data: Data) -> PulseOxMeasurement? {
+    private func parseContinuous(_ data: Data) -> VitalsMeasurement? {
         guard data.count >= 5 else { return nil }
         let flags = data[data.startIndex]
         var spo2 = Self.noReadingToNil(SFLOAT.decode(data, at: 1))
@@ -54,24 +54,24 @@ public struct PLXSParser: MeasurementParser {
             pr = nil
         }
 
-        return PulseOxMeasurement(
+        return VitalsMeasurement(
             spo2: spo2,
             pulseRate: pr,
-            fingerDetected: finger,
+            contactDetected: finger,
             quality: quality,
             raw: data
         )
     }
 
     // 0x2A5E: flags(1) | SpO2 SFLOAT(2) | PR SFLOAT(2) | [timestamp | status | ...].
-    private func parseSpotCheck(_ data: Data) -> PulseOxMeasurement? {
+    private func parseSpotCheck(_ data: Data) -> VitalsMeasurement? {
         guard data.count >= 5 else { return nil }
         let spo2 = Self.noReadingToNil(SFLOAT.decode(data, at: 1))
         let pr = Self.noReadingToNil(SFLOAT.decode(data, at: 3))
-        return PulseOxMeasurement(
+        return VitalsMeasurement(
             spo2: spo2,
             pulseRate: pr,
-            fingerDetected: spo2 != nil,
+            contactDetected: spo2 != nil,
             quality: spo2 == nil ? .searching : .good,
             raw: data
         )
@@ -85,14 +85,14 @@ public struct PLXSParser: MeasurementParser {
         return value
     }
 
-    /// Map the PLX Device and Sensor Status bitfield to (fingerDetected, quality).
+    /// Map the PLX Device and Sensor Status bitfield to (contactDetected, quality).
     static func interpretDeviceStatus(_ status: UInt32, spo2: Double?) -> (Bool, SignalQuality) {
         let poorSignal = status & (1 << 4) != 0
         let lowPerfusion = status & (1 << 5) != 0
         let nonPulsatile = status & (1 << 7) != 0
         let sensorUnconnected = status & (1 << 11) != 0
         if sensorUnconnected || nonPulsatile {
-            return (false, .noFinger)
+            return (false, .noContact)
         }
         if lowPerfusion || poorSignal {
             return (spo2 != nil, .lowPerfusion)

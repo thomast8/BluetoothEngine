@@ -90,8 +90,9 @@ struct ContentView: View {
         HStack(spacing: 32) {
             metric("SpO₂", model.latest?.spo2.map { String(format: "%.0f%%", $0) } ?? "—")
             metric("Pulse", model.latest?.pulseRate.map { String(format: "%.0f", $0) } ?? "—", unit: "bpm")
+            metric("RR", model.latestRRMillis?.last.map { String(format: "%.0f", $0) } ?? "—", unit: "ms")
             VStack(alignment: .leading) {
-                Text("finger \(model.latest?.fingerDetected == true ? "yes" : "no")")
+                Text("contact \(model.latest?.contactDetected == true ? "yes" : "no")")
                 Text("quality \(model.latest?.quality.rawValue ?? "—")")
             }
             .font(.callout).foregroundStyle(.secondary)

@@ -4,14 +4,14 @@ import Foundation
 /// Transforms a raw-notification stream into decoded measurements using a `MeasurementParser`.
 ///
 /// This is the seam between transport and domain: `BLECentral` produces `RawNotification`s and knows
-/// nothing about pulse oximetry; this free function applies a parser and yields `PulseOxMeasurement`s.
+/// nothing about any sensor profile; this free function applies a parser and yields `VitalsMeasurement`s.
 /// Frames the parser can't decode (wrong characteristic, pleth-only, etc.) are dropped. The work runs
 /// in a child task that is cancelled when the returned stream is dropped, and finishes when the source
 /// stream finishes.
-public func pulseOxMeasurements(
+public func vitalsMeasurements(
     from notifications: AsyncStream<RawNotification>,
     parser: MeasurementParser
-) -> AsyncStream<PulseOxMeasurement> {
+) -> AsyncStream<VitalsMeasurement> {
     AsyncStream { continuation in
         let task = Task {
             for await note in notifications {

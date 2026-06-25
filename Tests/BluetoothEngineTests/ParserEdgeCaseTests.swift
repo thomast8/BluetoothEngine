@@ -37,8 +37,8 @@ final class ParserEdgeCaseTests: XCTestCase {
         // there and confirm the parser reads status from the shifted offset (→ finger out).
         let f = frame("0D 62 00 3C 00 FF FF FF FF 00 00 00 08 00")
         let m = parser.parse(characteristic: KnownUUIDs.plxContinuousMeasurement, value: f)
-        XCTAssertEqual(m?.fingerDetected, false)
-        XCTAssertEqual(m?.quality, .noFinger)
+        XCTAssertEqual(m?.contactDetected, false)
+        XCTAssertEqual(m?.quality, .noContact)
         XCTAssertNil(m?.spo2)
     }
 
@@ -47,7 +47,7 @@ final class ParserEdgeCaseTests: XCTestCase {
         let f = frame("08 62 00 3C 00")
         let m = parser.parse(characteristic: KnownUUIDs.plxContinuousMeasurement, value: f)
         XCTAssertEqual(m?.spo2, 98)
-        XCTAssertEqual(m?.fingerDetected, true)
+        XCTAssertEqual(m?.contactDetected, true)
         XCTAssertEqual(m?.quality, .good)
     }
 
@@ -57,7 +57,7 @@ final class ParserEdgeCaseTests: XCTestCase {
         let f = frame("00 00 00 00 00")
         let m = parser.parse(characteristic: KnownUUIDs.plxSpotCheckMeasurement, value: f)
         XCTAssertNil(m?.spo2)
-        XCTAssertEqual(m?.fingerDetected, false)
+        XCTAssertEqual(m?.contactDetected, false)
         XCTAssertEqual(m?.quality, .searching)
     }
 

@@ -18,7 +18,7 @@ final class DebugModel {
     }
 
     enum ParserChoice: String, CaseIterable, Identifiable {
-        case auto, plxs, proprietary
+        case auto, plxs, hrs, proprietary
         var id: String { rawValue }
     }
 
@@ -40,7 +40,10 @@ final class DebugModel {
     var devices: [DiscoveredPeripheral] = []
     var connectedName: String?
     var services: [ServiceInfo] = []
-    var latest: PulseOxMeasurement?
+    var latest: VitalsMeasurement?
+    /// Last RR-interval set seen. Heart-rate frames carry RR only sporadically, so hold the previous
+    /// value rather than blanking the readout on every plain (RR-less) HR frame.
+    var latestRRMillis: [Double]?
     var log: [LogLine] = []
     var parserChoice: ParserChoice = .auto
     /// When on, the device list shows only peripherals the engine can decode (debug app shows all by
@@ -109,6 +112,9 @@ final class DebugModel {
         scanTask?.cancel()
         central.finishActiveStreams()
         phase = .connecting
+        // Clear sticky readout state so a reconnect doesn't show the previous device's last RR.
+        latest = nil
+        latestRRMillis = nil
         connectedName = device.name ?? device.id.uuidString
         logger.log("connecting", ["id": device.id.uuidString, "name": connectedName ?? NSNull()])
         Task { @MainActor in
@@ -133,6 +139,7 @@ final class DebugModel {
         phase = .idle
         services = []
         latest = nil
+        latestRRMillis = nil
         connectedName = nil
         logger.log("disconnect")
     }
@@ -152,6 +159,7 @@ final class DebugModel {
     private func makeParser() -> MeasurementParser? {
         switch parserChoice {
         case .plxs: return PLXSParser()
+        case .hrs: return HeartRateParser()
         case .proprietary: return ProprietaryPM100Parser()
         case .auto: return SupportedDevices.parser(forServiceUUIDs: services.map(\.uuid))
         }
@@ -185,14 +193,16 @@ final class DebugModel {
                     "note": "proprietary PM100 decoder is a stub — no measurements will be produced",
                 ])
             }
-            let measureStream = pulseOxMeasurements(from: central.notifications(), parser: parser)
+            let measureStream = vitalsMeasurements(from: central.notifications(), parser: parser)
             measureTask = Task { @MainActor in
                 for await measurement in measureStream {
                     self.latest = measurement
+                    if let rr = measurement.rrIntervalsMillis { self.latestRRMillis = rr }
                     self.logger.log("measurement", [
                         "spo2": measurement.spo2 ?? NSNull(),
                         "pr": measurement.pulseRate ?? NSNull(),
-                        "finger": measurement.fingerDetected,
+                        "rr": measurement.rrIntervalsMillis ?? NSNull(),
+                        "finger": measurement.contactDetected,
                         "quality": measurement.quality.rawValue,
                         "hex": Self.hex(measurement.raw),
                     ])
