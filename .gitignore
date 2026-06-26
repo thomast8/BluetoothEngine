@@ -7,7 +7,8 @@
 *.xcworkspace
 DerivedData/
 
-# Built debug app bundle (make-debug-app.sh drops it at the repo root)
+# Build outputs (make-debug-app.sh outputs to dist/; legacy root bundle also excluded)
+/dist/
 /SensorDebug.app/
 
 # macOS
