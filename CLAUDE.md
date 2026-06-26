@@ -57,7 +57,7 @@ notifying characteristic (battery included); the CLI passes explicit targets and
 ## Build · test · run
 
 ```sh
-swift build
+swift build                                                          # or: make build  →  dist/sensor, dist/sensor-debug
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test   # 80 pure-function tests
 ```
 
