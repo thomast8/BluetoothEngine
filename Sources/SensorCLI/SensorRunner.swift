@@ -131,7 +131,6 @@ enum SensorRunner {
         switch service.lowercased() {
         case "plxs": parser = PLXSParser()
         case "hrs": parser = HeartRateParser()
-        case "proprietary": parser = ProprietaryPM100Parser()
         // `auto`: match the discovered GATT (service OR characteristic), so a standard characteristic
         // under a vendor service still decodes.
         default: parser = SupportedDevices.parser(for: services)
@@ -139,13 +138,6 @@ enum SensorRunner {
         guard let parser else {
             central.disconnect()
             throw BLEError.connectionFailed(reason: "no decoder for this device — use `raw` to capture frames, or pass --service plxs")
-        }
-        if parser is ProprietaryPM100Parser {
-            // The proprietary decoder is a not-yet-reverse-engineered stub: it subscribes but `parse`
-            // always returns nil, so `decode --service proprietary` would otherwise sit silent forever.
-            FileHandle.standardError.write(Data(
-                "warning: the proprietary PM100 decoder is not yet implemented — it will emit no measurements. Use `raw --csv` to capture frames for reverse-engineering.\n".utf8
-            ))
         }
 
         // Read-once telemetry header (best-effort: never block decoding on a missing optional service).

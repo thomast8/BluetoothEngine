@@ -77,8 +77,6 @@ Verified against a **Medisana PM100** (rebadged ChoiceMMed MD300C208S) implement
 service — SpO₂/PR decode with no reverse-engineering, plus the standard Battery (`0x180F`) and Device
 Information (`0x180A`) services the telemetry reads surface. Also verified against a **Whoop 5.0** in
 Broadcast Heart Rate mode (standard HR service `0x180D`/`0x2A37`) — live HR + RR via `HeartRateParser`.
-`Parsing/ProprietaryPM100Parser.swift` is an intentional stub (returns nil) kept as the fallback path
-for non-standard devices; reverse-engineer it from `sensor raw --csv` captures.
 
 ## Conventions
 

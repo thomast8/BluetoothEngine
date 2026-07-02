@@ -162,12 +162,12 @@ struct Raw: AsyncParsableCommand {
 struct Decode: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "decode",
-        abstract: "Parse measurements live (standard PLXS now; proprietary once implemented)."
+        abstract: "Parse measurements live (standard PLXS or HRS, auto-detected from the GATT)."
     )
 
     @OptionGroup var selector: PeripheralSelector
 
-    @Option(name: .long, help: "Parser to use: auto | plxs | hrs | proprietary.")
+    @Option(name: .long, help: "Parser to use: auto | plxs | hrs.")
     var service: String = "auto"
 
     func run() async throws {

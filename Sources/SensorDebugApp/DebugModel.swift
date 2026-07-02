@@ -18,7 +18,7 @@ final class DebugModel {
     }
 
     enum ParserChoice: String, CaseIterable, Identifiable {
-        case auto, plxs, hrs, proprietary
+        case auto, plxs, hrs
         var id: String { rawValue }
     }
 
@@ -342,7 +342,6 @@ final class DebugModel {
         switch parserChoice {
         case .plxs: return PLXSParser()
         case .hrs: return HeartRateParser()
-        case .proprietary: return ProprietaryPM100Parser()
         case .auto: return SupportedDevices.parser(for: services)
         }
     }
@@ -367,14 +366,6 @@ final class DebugModel {
 
         if let parser = makeParser() {
             logger.log("parser", ["choice": parserChoice.rawValue, "type": "\(type(of: parser))"])
-            if parser is ProprietaryPM100Parser {
-                // Stub decoder: surface that it produces nothing, so a quiet measurement panel reads
-                // as "not implemented yet" rather than "device sent no data".
-                logger.log("parser_unimplemented", [
-                    "choice": parserChoice.rawValue,
-                    "note": "proprietary PM100 decoder is a stub — no measurements will be produced",
-                ])
-            }
             let measureStream = vitalsMeasurements(from: central.notifications(), parser: parser)
             measureTask = Task { @MainActor in
                 for await measurement in measureStream {
