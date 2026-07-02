@@ -6,8 +6,7 @@ import CoreBluetooth
 /// AirPod and beacon in the room" smell — it can scan filtered to `serviceUUIDs` or post-filter
 /// discoveries with `supports(_:)`, instead of guessing.
 public enum SupportedDevices {
-    /// Parsers the engine ships with. The proprietary stub is intentionally excluded — it isn't a
-    /// real capability until its protocol is implemented.
+    /// Parsers the engine ships with.
     public static var parsers: [MeasurementParser] {
         [PLXSParser(), HeartRateParser()]
     }

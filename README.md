@@ -56,8 +56,7 @@ the `sensor` CLI against hardware, ad-hoc sign it too: `codesign --sign - "$(swi
 Verified against a real **Medisana PM100** (a rebadged ChoiceMMed MD300C208S) which implements the
 standard PLX service — SpO₂ + pulse rate decode out of the box, no reverse-engineering needed. It also
 exposes the standard Battery (`0x180F`) and Device Information (`0x180A`) services, which the telemetry
-reads surface. The `raw` capture + `ProprietaryPM100Parser` stub remain as the fallback path for
-non-standard devices.
+reads surface.
 
 Also verified against a real **Whoop 5.0** in **Broadcast Heart Rate** mode, which exposes the
 standard Heart Rate Service (`0x180D` / `0x2A37`) — live heart rate + RR-intervals decode out of the

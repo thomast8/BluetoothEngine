@@ -119,13 +119,6 @@ final class SupportedDevicesTests: XCTestCase {
         XCTAssertFalse(SupportedDevices.supports([]))
     }
 
-    func testParserForServicesNeverReturnsExcludedProprietaryStub() {
-        // The proprietary stub's declared service ("0000") + empty chars must not resolve to anything —
-        // it's intentionally excluded from `parsers` until implemented.
-        let stub = ProprietaryPM100Parser()
-        let services = [service(stub.serviceUUID.uuidString)]
-        XCTAssertNil(SupportedDevices.parser(for: services))
-    }
 }
 
 final class KnownUUIDsTests: XCTestCase {
