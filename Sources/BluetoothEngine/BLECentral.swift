@@ -64,6 +64,26 @@ public final class BLECentral: NSObject {
     // MARK: - State
 
     public var isPoweredOn: Bool { manager.state == .poweredOn }
+
+    /// The peripheral currently connected through this central, if any.
+    ///
+    /// `connect(matching:)` takes a name as readily as an identifier, but only the identifier is
+    /// worth *remembering*: `retrievePeripherals(withIdentifiers:)` reconnects to it with no scan
+    /// at all, where a name has to be matched against advertisements. So an app that connected by
+    /// name (or through discovery) needs a way to learn which peripheral it actually reached, in
+    /// order to remember it. `rssi` is 0 — the value is not read here — and `advertisedServices`
+    /// is empty, since a connected peripheral is described by its GATT (`inventory()`) rather
+    /// than by an advertisement.
+    public var connectedPeripheral: DiscoveredPeripheral? {
+        guard let peripheral, peripheral.state == .connected else { return nil }
+        return DiscoveredPeripheral(
+            id: peripheral.identifier,
+            name: peripheral.name ?? activeMatchedName ?? knownNamesByID[peripheral.identifier],
+            rssi: 0,
+            advertisedServices: [],
+            isConnectable: true
+        )
+    }
     public var stateDescription: String { Self.describe(manager.state) }
     public var authorizationDescription: String { Self.describe(CBManager.authorization) }
 
