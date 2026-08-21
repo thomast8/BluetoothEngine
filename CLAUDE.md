@@ -46,6 +46,10 @@ decode layer stays stateless. The app combines them in its view model (`DebugMod
 - Capabilities: `central.readPLXFeatures() -> PLXFeatures?` (read-once).
 - Link: `central.connectionStates() -> AsyncStream<ConnectionState>` (lifecycle; no auto-reconnect) and
   `central.readRSSI() -> Int?` (poll for live signal strength).
+- Which device you actually reached: `central.connectedPeripheral -> DiscoveredPeripheral?`. Worth
+  storing — `connect(matching: .id(...))` goes through `retrievePeripherals(withIdentifiers:)` and needs
+  no scan, so a remembered identifier reconnects in a second where a name match (or `discoverSupported`)
+  has to scan, and probing discovery can take minutes in a room full of BLE.
 - `central.readCharacteristics([CBUUID]) -> [CBUUID: Data]` is the generic targeted read under all of the
   above; reuse it before adding a bespoke read path.
 
