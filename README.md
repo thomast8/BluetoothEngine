@@ -2,7 +2,7 @@
 
 A small, focused Swift package for reading **Bluetooth LE biometric sensors** — pulse oximeters
 (SpO₂ + pulse rate) and heart-rate bands (heart rate + RR-interval HRV) — plus **battery level** and
-**device telemetry**, on macOS and iOS, with a CLI sniffer and a SwiftUI debug app. A reusable
+**device telemetry**, on macOS, iOS and watchOS (the library), with a CLI sniffer and a SwiftUI debug app. A reusable
 standalone biofeedback input for breath-hold / apnea training.
 
 ## Layout
