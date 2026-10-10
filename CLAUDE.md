@@ -1,7 +1,7 @@
 # BluetoothEngine — architecture map for agents
 
 A small Swift 6 package for reading **BLE biometric sensors** — pulse oximeters (SpO₂ + pulse rate) and
-heart-rate bands (HR + RR-interval HRV) — plus battery and device telemetry, on macOS/iOS, with a CLI
+heart-rate bands (HR + RR-interval HRV) — plus battery and device telemetry, on macOS/iOS/watchOS (library only), with a CLI
 sniffer and a SwiftUI debug app. Read this before exploring — it is the fast path so you don't re-derive
 the layering every session.
 
